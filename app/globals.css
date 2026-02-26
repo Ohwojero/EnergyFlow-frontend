@@ -1,0 +1,170 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Professional Blue/Green Banking Color Scheme */
+:root {
+  /* Core Colors */
+  --background: #FFFFFF;
+  --foreground: #1F2937;
+  --card: #FFFFFF;
+  --card-foreground: #1F2937;
+  --popover: #FFFFFF;
+  --popover-foreground: #1F2937;
+  
+  /* Brand Colors - Banking Blue & Green */
+  --primary: #0066CC;              /* Trust Blue */
+  --primary-foreground: #FFFFFF;
+  --secondary: #00A86B;            /* Emerald Green */
+  --secondary-foreground: #FFFFFF;
+  --accent: #FFB81C;               /* Gold */
+  --accent-foreground: #1F2937;
+  
+  /* Neutral Palette */
+  --muted: #F3F4F6;
+  --muted-foreground: #6B7280;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  
+  /* Borders & Inputs */
+  --border: #E5E7EB;
+  --input: #F9FAFB;
+  --ring: #0066CC;
+  
+  /* Chart Colors */
+  --chart-1: #0066CC;              /* Primary Blue */
+  --chart-2: #1DB584;              /* Teal */
+  --chart-3: #00A86B;              /* Emerald Green */
+  --chart-4: #FFB81C;              /* Gold */
+  --chart-5: #006B9E;              /* Deep Blue */
+  
+  /* Radius */
+  --radius: 0.75rem;
+  
+  /* Sidebar Colors */
+  --sidebar: #0F1419;              /* Dark Navy */
+  --sidebar-foreground: #F3F4F6;
+  --sidebar-primary: #0066CC;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFB81C;
+  --sidebar-accent-foreground: #1F2937;
+  --sidebar-border: #1F2937;
+  --sidebar-ring: #0066CC;
+}
+
+.dark {
+  /* Core Colors - Dark Mode */
+  --background: #0F1419;
+  --foreground: #F3F4F6;
+  --card: #1A1F2E;
+  --card-foreground: #F3F4F6;
+  --popover: #1A1F2E;
+  --popover-foreground: #F3F4F6;
+  
+  /* Brand Colors - Dark Mode */
+  --primary: #4D9AFF;              /* Light Blue */
+  --primary-foreground: #0F1419;
+  --secondary: #1DB584;            /* Teal */
+  --secondary-foreground: #0F1419;
+  --accent: #FFB81C;               /* Gold */
+  --accent-foreground: #1F2937;
+  
+  /* Neutral Palette - Dark Mode */
+  --muted: #374151;
+  --muted-foreground: #9CA3AF;
+  --destructive: #F87171;
+  --destructive-foreground: #0F1419;
+  
+  /* Borders & Inputs - Dark Mode */
+  --border: #374151;
+  --input: #1F2937;
+  --ring: #4D9AFF;
+  
+  /* Chart Colors - Dark Mode */
+  --chart-1: #4D9AFF;
+  --chart-2: #1DB584;
+  --chart-3: #00D98E;
+  --chart-4: #FFB81C;
+  --chart-5: #7DD3FC;
+  
+  /* Sidebar Colors - Dark Mode */
+  --sidebar: #0F1419;
+  --sidebar-foreground: #F3F4F6;
+  --sidebar-primary: #4D9AFF;
+  --sidebar-primary-foreground: #0F1419;
+  --sidebar-accent: #FFB81C;
+  --sidebar-accent-foreground: #1F2937;
+  --sidebar-border: #1F2937;
+  --sidebar-ring: #4D9AFF;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground text-lg;
+    font-size: 18px;
+  }
+  
+  /* Custom scrollbar styles */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #9CA3AF;
+    border-radius: 3px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6B7280;
+  }
+}
