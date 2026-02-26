@@ -15,6 +15,9 @@ import {
   Building2,
   LogOut,
   X,
+  Activity,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -85,6 +88,9 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
 
       case 'gas_manager':
         items.push(
+          { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
+          { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
+          { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
           { label: 'Inventory', href: '/gas/inventory', icon: Package },
           { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
           { label: 'Expenses', href: '/gas/expenses', icon: AlertCircle },
