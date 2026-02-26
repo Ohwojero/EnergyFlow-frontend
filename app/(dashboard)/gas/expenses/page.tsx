@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/metric-card'
@@ -10,6 +10,9 @@ import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useAuth } from '@/context/auth-context'
+import { mockBranches } from '@/lib/mock-data'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -19,14 +22,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
+import { getAllExpenses, addExpense } from '@/lib/expense-store'
+
 // Mock expense data
-const mockExpenses = [
+const mockExpenses: Array<{id:string;category:string;amount:number;description:string;created_at:string;branch_id?:string}> = [
   {
     id: 'exp-1',
     category: 'cylinder_repair',
     amount: 25000,
     description: 'Repair of 3 damaged cylinders',
     created_at: new Date().toISOString(),
+    branch_id: 'branch-1',
   },
   {
     id: 'exp-2',
@@ -34,11 +40,29 @@ const mockExpenses = [
     amount: 15000,
     description: 'Monthly safety inspection',
     created_at: new Date(Date.now() - 86400000).toISOString(),
+    branch_id: 'branch-1',
   },
 ]
 
 export default function GasExpensesPage() {
-  const [expenses, setExpenses] = useState(mockExpenses)
+  const { user, selectedBranchId } = useAuth()
+  const isOwner = user?.role === 'org_owner'
+
+  const userGasBranches = user?.assigned_branches.filter(
+    (id) => mockBranches.find((b) => b.id === id && b.type === 'gas')
+  ) || []
+
+  const currentBranchInfo = selectedBranchId
+    ? mockBranches.find((b) => b.id === selectedBranchId)
+    : null
+
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(
+    isOwner ? null : selectedBranchId
+  )
+
+  const [gasExpenses, setGasExpenses] = useState(getAllExpenses('gas', mockExpenses))
+  const [fuelExpenses, setFuelExpenses] = useState(getAllExpenses('fuel', []))
+
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
@@ -47,8 +71,6 @@ export default function GasExpensesPage() {
     description: '',
   })
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0)
-  const avgExpense = expenses.length > 0 ? totalExpenses / expenses.length : 0
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -73,8 +95,8 @@ export default function GasExpensesPage() {
     })
   }
 
-  const groupByMonth = (expenses: typeof mockExpenses) => {
-    const groups: Record<string, typeof mockExpenses> = {}
+  const groupByMonth = <T extends { created_at: string }>(expenses: T[]) => {
+    const groups: Record<string, T[]> = {}
     expenses.forEach((e) => {
       const date = new Date(e.created_at)
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -84,8 +106,59 @@ export default function GasExpensesPage() {
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(expenses)
   const currentMonth = new Date().toISOString().slice(0, 7)
+
+  // combine when owner; otherwise just gas
+  const expenses = isOwner
+    ? [
+        ...gasExpenses.map((e) => ({ ...e, _type: 'gas' })),
+        ...fuelExpenses.map((e) => ({ ...e, _type: 'fuel' })),
+      ]
+    : gasExpenses
+
+  // derive visible expenses without mutating the base array
+  const visibleExpenses = (() => {
+    const source = expenses
+    if (isOwner) {
+      if (!localSelectedBranchId) {
+        return source.map((e) => ({
+          ...e,
+          branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
+        }))
+      }
+      return source
+        .filter((e) => e.branch_id === localSelectedBranchId)
+        .map((e) => ({
+          ...e,
+          branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
+        }))
+    } else {
+      const filtered = source.filter((e) => e.branch_id === selectedBranchId)
+      return filtered.map((e) => ({
+        ...e,
+        branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
+      }))
+    }
+  })()
+
+  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const avgExpense = visibleExpenses.length > 0 ? totalExpenses / visibleExpenses.length : 0
+
+  const monthGroups = groupByMonth(visibleExpenses)
+  
+  // Listen for changes to localStorage (when managers record expenses)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key?.includes('energyflow_expenses_gas')) {
+        setGasExpenses(getAllExpenses('gas', mockExpenses))
+      }
+      if (e.key?.includes('energyflow_expenses_fuel')) {
+        setFuelExpenses(getAllExpenses('fuel', []))
+      }
+    }
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
+  }, [])
 
   const resetForm = () => {
     setFormData({
@@ -117,16 +190,28 @@ export default function GasExpensesPage() {
     }
 
     setIsSubmitting(true)
+    const chosenBranch = isOwner
+      ? localSelectedBranchId ??
+        user?.assigned_branches?.[0] ??
+        mockExpenses[0]?.branch_id ??
+        'branch-1'
+      : selectedBranchId ??
+        user?.assigned_branches?.[0] ??
+        mockExpenses[0]?.branch_id ??
+        'branch-1'
     const nextExpense = {
       id: `exp-${Date.now()}`,
       category: formData.category,
       amount,
       description,
+      branch_id: chosenBranch,
+      branch_name: mockBranches.find((b) => b.id === chosenBranch)?.name,
       created_at: new Date().toISOString(),
     }
 
     try {
-      setExpenses((prev) => [nextExpense, ...prev])
+      addExpense('gas', nextExpense)
+      setGasExpenses((prev) => [nextExpense, ...prev])
       toast({
         title: 'Expense recorded',
         description: 'Gas expense has been added successfully.',
@@ -150,6 +235,11 @@ export default function GasExpensesPage() {
           <p className="text-muted-foreground">
             Track and manage branch operating expenses
           </p>
+          {!isOwner && currentBranchInfo && (
+            <p className="text-sm text-muted-foreground mt-2">
+              <span className="font-semibold text-foreground">{currentBranchInfo.name}</span> • {currentBranchInfo.location}
+            </p>
+          )}
         </div>
         <Button
           onClick={() => setIsExpenseModalOpen(true)}
@@ -158,6 +248,36 @@ export default function GasExpensesPage() {
           Record Expense
         </Button>
       </div>
+
+      {/* Branch selector for owners or multi-branch managers */}
+      {(isOwner || userGasBranches.length > 1) && (
+        <Card className="p-4 mb-6 bg-muted/50 border-border">
+          <div className="flex items-center gap-4">
+            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+            {isOwner ? (
+              <Select value={localSelectedBranchId || 'all'} onValueChange={(v) => setLocalSelectedBranchId(v === 'all' ? null : v)}>
+                <SelectTrigger className="w-80">
+                  <SelectValue placeholder="All branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {mockBranches
+                    .filter((b) => b.type === 'gas')
+                    .map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name} ({branch.location})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {currentBranchInfo?.name} • {currentBranchInfo?.location}
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -212,6 +332,10 @@ export default function GasExpensesPage() {
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
+                            {isOwner && (
+                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Type</th>
+                            )}
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
@@ -221,6 +345,10 @@ export default function GasExpensesPage() {
                           {monthExpenses.map((expense) => (
                             <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">{expense.branch_name}</td>
+                              {isOwner && (
+                                <td className="px-6 py-4 text-foreground capitalize">{expense._type}</td>
+                              )}
                               <td className="px-6 py-4">
                                 <Badge className={getCategoryColor(expense.category)}>
                                   {getCategoryLabel(expense.category)}

@@ -22,13 +22,25 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-type SaleTransaction = GasTransaction
+type SaleTransaction = GasTransaction & { branch_name?: string }
 
 export default function GasSalesPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
   const isManager = user?.role === 'gas_manager'
   const canEditDelete = isOwner || isManager
+
+  // compute gas‑type branches assigned to user
+  const userGasBranches = user?.assigned_branches.filter(
+    (id) => mockBranches.find((b) => b.id === id && b.type === 'gas')
+  ) || []
+
+  const currentBranchInfo = selectedBranchId
+    ? mockBranches.find((b) => b.id === selectedBranchId)
+    : null
+
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(selectedBranchId)
+
   const [isRecordSaleOpen, setIsRecordSaleOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [salesTransactions, setSalesTransactions] = useState<SaleTransaction[]>([])
@@ -42,12 +54,19 @@ export default function GasSalesPage() {
 
   useEffect(() => {
     const baseSales = getAllGasSales()
+    const effectiveBranchId = isOwner ? localSelectedBranchId : selectedBranchId
     const scopedSales =
-      isOwner || !selectedBranchId
+      isOwner && !localSelectedBranchId
         ? baseSales
-        : baseSales.filter((transaction) => transaction.branch_id === selectedBranchId)
-    setSalesTransactions(scopedSales)
-  }, [isOwner, selectedBranchId])
+        : baseSales.filter((transaction) => transaction.branch_id === effectiveBranchId)
+
+    setSalesTransactions(
+      scopedSales.map((t) => {
+        const branch = mockBranches.find((b) => b.id === t.branch_id)
+        return { ...t, branch_name: branch?.name }
+      })
+    )
+  }, [isOwner, selectedBranchId, localSelectedBranchId])
 
   const totalSales = salesTransactions.reduce((sum, t) => sum + t.amount, 0)
   const avgSaleValue = salesTransactions.length > 0 ? totalSales / salesTransactions.length : 0
@@ -149,6 +168,11 @@ export default function GasSalesPage() {
             Sales Management
           </h1>
           <p className="text-muted-foreground">Track and record all gas sales transactions</p>
+          {!isOwner && currentBranchInfo && (
+            <p className="text-sm text-muted-foreground mt-2">
+              <span className="font-semibold text-foreground">{currentBranchInfo.name}</span> • {currentBranchInfo.location}
+            </p>
+          )}
         </div>
         {!isOwner && (
           <Button onClick={() => setIsRecordSaleOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -156,6 +180,38 @@ export default function GasSalesPage() {
           </Button>
         )}
       </div>
+
+      {/* Branch selector for owners or multi‑branch managers */}
+      {(isOwner || userGasBranches.length > 1) && (
+        <Card className="p-4 mb-6 bg-muted/50 border-border">
+          <div className="flex items-center gap-4">
+            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+            {isOwner ? (
+              <Select value={localSelectedBranchId || 'all'} onValueChange={(v) => setLocalSelectedBranchId(v === 'all' ? null : v)}>
+                <SelectTrigger className="w-80">
+                  <SelectValue placeholder="All branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {mockBranches
+                    .filter((b) => b.type === 'gas')
+                    .map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name} ({branch.location})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {currentBranchInfo?.name} • {currentBranchInfo?.location}
+                </p>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
@@ -228,7 +284,7 @@ export default function GasSalesPage() {
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date & Time</th>
-                            {isOwner && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>}
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Kg Sold</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Payment</th>
@@ -243,7 +299,7 @@ export default function GasSalesPage() {
                             return (
                               <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                                 <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
-                                {isOwner && <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>}
+                                <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>
                                 <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
                                 <td className="px-6 py-4 font-semibold text-foreground">₦{transaction.amount.toLocaleString()}</td>
                                 <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>

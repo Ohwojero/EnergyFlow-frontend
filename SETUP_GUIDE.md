@@ -4,8 +4,8 @@
 
 EnergyFlow is a complete SaaS platform for managing LPG Gas Plants and Fuel Stations with two distinct plan types:
 
-- **Personal Plan** (₦15,000/month): Single branch (Gas OR Fuel)
-- **Organisation Plan** (₦20,000/month): Multiple branches (Gas & Fuel mixed)
+- **Personal Plan** (₦50,000/month): Single branch (Gas OR Fuel)
+- **Organisation Plan** (₦100,000/month): Multiple branches (Gas & Fuel mixed)
 
 ## Application Flow
 

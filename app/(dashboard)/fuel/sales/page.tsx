@@ -11,6 +11,7 @@ import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import type { ShiftReconciliation } from '@/types'
 import { addFuelShift, getAllFuelShifts } from '@/lib/fuel-shift-store'
+import { mockBranches } from '@/lib/mock-data'
 import {
   Dialog,
   DialogContent,
@@ -19,31 +20,57 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type ShiftEntry = ShiftReconciliation & {
   sales_staff_name: string
+  branch_name?: string
 }
 
 export default function FuelSalesPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
+  const isFuelManager = user?.role === 'fuel_manager'
+
+  // Get user's assigned branches for fuel operations
+  const userFuelBranches = user?.assigned_branches.filter(
+    (branchId) => mockBranches.find((b) => b.id === branchId && b.type === 'fuel')
+  ) || []
+
+  // Get current branch info
+  const currentBranchInfo = selectedBranchId
+    ? mockBranches.find((b) => b.id === selectedBranchId)
+    : null
 
   const [shifts, setShifts] = useState<ShiftEntry[]>([])
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(selectedBranchId)
 
   useEffect(() => {
     const baseShifts = getAllFuelShifts()
+    const effectiveBranchId = isOwner ? localSelectedBranchId : selectedBranchId
+    
     const scopedShifts =
-      isOwner || !selectedBranchId
+      isOwner && !localSelectedBranchId
         ? baseShifts
-        : baseShifts.filter((shift) => shift.branch_id === selectedBranchId)
+        : baseShifts.filter((shift) => shift.branch_id === effectiveBranchId)
 
     setShifts(
-      scopedShifts.map((shift) => ({
-        ...shift,
-        sales_staff_name: (shift as ShiftEntry).sales_staff_name || 'Unassigned',
-      }))
+      scopedShifts.map((shift) => {
+        const branch = mockBranches.find((b) => b.id === shift.branch_id)
+        return {
+          ...shift,
+          sales_staff_name: (shift as ShiftEntry).sales_staff_name || 'Unassigned',
+          branch_name: branch?.name || 'Unknown Branch',
+        }
+      })
     )
-  }, [isOwner, selectedBranchId])
+  }, [isOwner, selectedBranchId, localSelectedBranchId])
 
   const [isRecordShiftOpen, setIsRecordShiftOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -189,6 +216,11 @@ export default function FuelSalesPage() {
             Fuel Sales
           </h1>
           <p className="text-muted-foreground">Track pump sales and shift reconciliation</p>
+          {!isOwner && currentBranchInfo && (
+            <p className="text-sm text-muted-foreground mt-2">
+              <span className="font-semibold text-foreground">{currentBranchInfo.name}</span> • {currentBranchInfo.location}
+            </p>
+          )}
         </div>
         {!isOwner && (
           <Button onClick={() => setIsRecordShiftOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -196,6 +228,38 @@ export default function FuelSalesPage() {
           </Button>
         )}
       </div>
+
+      {/* Branch Selector for Owners or Multi-Branch Users */}
+      {(isOwner || userFuelBranches.length > 1) && (
+        <Card className="p-4 mb-6 bg-muted/50 border-border">
+          <div className="flex items-center gap-4">
+            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+            {isOwner ? (
+              <Select value={localSelectedBranchId || 'all'} onValueChange={(value) => setLocalSelectedBranchId(value === 'all' ? null : value)}>
+                <SelectTrigger className="w-80">
+                  <SelectValue placeholder="All branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {mockBranches
+                    .filter((b) => b.type === 'fuel')
+                    .map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name} ({branch.location})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            ) : userFuelBranches.length > 1 ? (
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {currentBranchInfo?.name} • {currentBranchInfo?.location}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
@@ -268,6 +332,7 @@ export default function FuelSalesPage() {
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Shift</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Assigned Staff</th>
@@ -280,6 +345,7 @@ export default function FuelSalesPage() {
                           {monthShifts.map((shift) => (
                             <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(shift.created_at)}</td>
+                              <td className="px-6 py-4 font-medium text-foreground">{shift.branch_name}</td>
                               <td className="px-6 py-4 font-medium text-foreground">Shift {shift.shift_number}</td>
                               <td className="px-6 py-4 text-foreground">{shift.pump_id}</td>
                               <td className="px-6 py-4 text-foreground">{shift.sales_staff_name}</td>
