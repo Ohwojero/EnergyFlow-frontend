@@ -20,21 +20,22 @@ export default function LandingPage() {
       {/* Header */}
       <header className="border-b border-border/60 sticky top-0 z-50 bg-background/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
-              <Zap className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+              <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-foreground">EnergyFlow</h1>
-              <p className="text-xs text-muted-foreground">Gas & Fuel Operations</p>
+              <h1 className="text-base sm:text-lg font-semibold tracking-tight text-foreground">EnergyFlow</h1>
+              <p className="text-xs text-muted-foreground hidden sm:block">Gas & Fuel Operations</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={() => router.push('/login')}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => router.push('/login')} size="sm" className="text-xs sm:text-sm">
               Sign In
             </Button>
-            <Button onClick={() => setShowPlanSelector(true)}>
-              Start Free Trial
+            <Button onClick={() => setShowPlanSelector(true)} size="sm" className="text-xs sm:text-sm">
+              <span className="hidden sm:inline">Start Free Trial</span>
+              <span className="sm:hidden">Start Trial</span>
             </Button>
           </div>
         </div>
@@ -155,25 +156,27 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border/60 bg-muted/30 py-10">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row items-center justify-between mb-8">
-            <div className="flex items-center gap-2 mb-4 md:mb-0">
+          <div className="flex flex-col items-center justify-center gap-4 mb-8">
+            <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Zap className="w-5 h-5 text-white" />
               </div>
               <h3 className="font-bold text-foreground">EnergyFlow</h3>
             </div>
-            <div className="flex gap-8 text-sm">
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 text-xs sm:text-sm">
               <button className="text-muted-foreground hover:text-foreground transition-colors">
                 Privacy
               </button>
               <button className="text-muted-foreground hover:text-foreground transition-colors">
                 Terms
               </button>
-              <span className="text-muted-foreground">(c) 2026 EnergyFlow. All rights reserved.</span>
               <button className="text-muted-foreground hover:text-foreground transition-colors">
                 Support
               </button>
             </div>
+            <span className="text-xs text-muted-foreground text-center">
+              © 2026 EnergyFlow. All rights reserved.
+            </span>
           </div>
         </div>
       </footer>
