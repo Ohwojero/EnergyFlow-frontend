@@ -65,8 +65,8 @@ export default function DashboardPage() {
       {/* Page Header */}
       {!hideDashboardHeaderForFuelSalesStaff && (
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">
             Welcome back! Here's your business performance at a glance.
           </p>
         </div>

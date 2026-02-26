@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { ShoppingCart, TrendingUp, ArrowUpRight } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import type { ShiftReconciliation } from '@/types'
 import { addFuelShift, getAllFuelShifts } from '@/lib/fuel-shift-store'
 import {
@@ -79,6 +80,20 @@ export default function FuelSalesPage() {
       minute: '2-digit',
     })
   }
+
+  const groupByMonth = (shifts: ShiftEntry[]) => {
+    const groups: Record<string, ShiftEntry[]> = {}
+    shifts.forEach((s) => {
+      const date = new Date(s.created_at)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(s)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(shifts)
+  const currentMonth = new Date().toISOString().slice(0, 7)
 
   const resetForm = () => {
     setFormData({
@@ -226,42 +241,62 @@ export default function FuelSalesPage() {
           <h3 className="text-lg font-semibold text-foreground">Shift Reconciliation</h3>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Shift</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Assigned Staff</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Start Reading</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">End Reading</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Sales Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shifts.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center">
-                    <p className="text-muted-foreground">No shift records yet</p>
-                  </td>
-                </tr>
-              ) : (
-                shifts.map((shift) => (
-                  <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4 text-foreground">{formatDate(shift.created_at)}</td>
-                    <td className="px-6 py-4 font-medium text-foreground">Shift {shift.shift_number}</td>
-                    <td className="px-6 py-4 text-foreground">{shift.pump_id}</td>
-                    <td className="px-6 py-4 text-foreground">{shift.sales_staff_name}</td>
-                    <td className="px-6 py-4 text-foreground">{shift.start_reading}</td>
-                    <td className="px-6 py-4 text-foreground">{shift.end_reading}</td>
-                    <td className="px-6 py-4 font-semibold text-foreground">₦{shift.sales_amount.toLocaleString()}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        {shifts.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">No shift records yet</p>
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
+            {monthGroups.map(([monthKey, monthShifts]) => {
+              const date = new Date(monthKey + '-01')
+              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+              const monthTotal = monthShifts.reduce((sum, s) => sum + s.sales_amount, 0)
+              
+              return (
+                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                  <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <span className="font-semibold">{monthName}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {monthShifts.length} shifts • ₦{monthTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/50">
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Shift</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Assigned Staff</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Start Reading</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">End Reading</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Sales Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthShifts.map((shift) => (
+                            <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                              <td className="px-6 py-4 text-foreground">{formatDate(shift.created_at)}</td>
+                              <td className="px-6 py-4 font-medium text-foreground">Shift {shift.shift_number}</td>
+                              <td className="px-6 py-4 text-foreground">{shift.pump_id}</td>
+                              <td className="px-6 py-4 text-foreground">{shift.sales_staff_name}</td>
+                              <td className="px-6 py-4 text-foreground">{shift.start_reading}</td>
+                              <td className="px-6 py-4 text-foreground">{shift.end_reading}</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">₦{shift.sales_amount.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        )}
       </Card>
 
       <Dialog

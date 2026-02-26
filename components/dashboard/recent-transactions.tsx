@@ -3,6 +3,7 @@
 import { Card } from '@/components/ui/card'
 import { mockGasTransactions, mockBranches } from '@/lib/mock-data'
 import { getAllGasSales } from '@/lib/gas-sales-store'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { ShoppingCart, Package, TrendingDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useRouter } from 'next/navigation'
@@ -61,51 +62,93 @@ export function RecentTransactions() {
     })
   }
 
+  const groupByMonth = (transactions: any[]) => {
+    const groups: Record<string, any[]> = {}
+    transactions.forEach((t) => {
+      const date = new Date(t.created_at)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(t)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(transactions)
+  const currentMonth = new Date().toISOString().slice(0, 7)
+
   return (
     <Card className="shadow-card">
       <div className="p-6 border-b border-border">
         <h3 className="text-lg font-semibold text-foreground">Recent Transactions</h3>
       </div>
       
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border bg-muted/50">
-              <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Type</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Details</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Amount</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((transaction) => {
-              const colorClass = getTransactionColor(transaction.type)
-              return (
-                <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${colorClass}`}>
-                      {getTransactionIcon(transaction.type)}
-                      <span className="text-sm font-medium capitalize">{transaction.type}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-foreground">
-                    <div>
-                      <p className="font-medium">{transaction.quantity} kg Gas</p>
-                      <p className="text-xs text-muted-foreground">{transaction.notes || 'Gas sale'}</p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-foreground">
-                    ₦{transaction.amount.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-muted-foreground">
-                    {formatDate(transaction.created_at)}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      {transactions.length === 0 ? (
+        <div className="px-6 py-8 text-center">
+          <p className="text-muted-foreground">No transactions yet</p>
+        </div>
+      ) : (
+        <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
+          {monthGroups.map(([monthKey, monthTransactions]) => {
+            const date = new Date(monthKey + '-01')
+            const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+            const monthTotal = monthTransactions.reduce((sum, t) => sum + t.amount, 0)
+            
+            return (
+              <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <span className="font-semibold">{monthName}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {monthTransactions.length} transactions • ₦{monthTotal.toLocaleString()}
+                    </span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Type</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Details</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Amount</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-muted-foreground">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthTransactions.map((transaction) => {
+                          const colorClass = getTransactionColor(transaction.type)
+                          return (
+                            <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${colorClass}`}>
+                                  {getTransactionIcon(transaction.type)}
+                                  <span className="text-sm font-medium capitalize">{transaction.type}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-foreground">
+                                <div>
+                                  <p className="font-medium">{transaction.quantity} kg Gas</p>
+                                  <p className="text-xs text-muted-foreground">{transaction.notes || 'Gas sale'}</p>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-sm font-semibold text-foreground">
+                                ₦{transaction.amount.toLocaleString()}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-muted-foreground">
+                                {formatDate(transaction.created_at)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            )
+          })}
+        </Accordion>
+      )}
 
       <div className="p-6 border-t border-border">
         <button 

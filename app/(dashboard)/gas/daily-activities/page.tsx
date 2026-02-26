@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/context/auth-context'
 import { saveGasDailyActivity, getGasDailyActivities, mockBranches } from '@/lib/mock-data'
 import { Activity, Plus, Trash2, Calculator } from 'lucide-react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import type { GasPumpReading } from '@/types'
 
 export default function GasDailyActivitiesPage() {
@@ -65,6 +66,20 @@ export default function GasDailyActivitiesPage() {
   const totalPumpKg = pumpReadings.reduce((sum, pump) => sum + pump.kg_dispensed, 0)
   const totalDailyKg = totalPumpKg + (Number(systemRecord) || 0) + (Number(sunAdjustment) || 0)
 
+  const groupByMonth = (records: any[]) => {
+    const groups: Record<string, any[]> = {}
+    records.forEach((r) => {
+      const date = new Date(r.date)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(r)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(records)
+  const currentMonth = new Date().toISOString().slice(0, 7)
+
   const handleSubmit = () => {
     const activity = {
       id: Date.now().toString(),
@@ -80,7 +95,10 @@ export default function GasDailyActivitiesPage() {
     
     saveGasDailyActivity(activity)
     setRecords([activity, ...records])
-    alert('Daily activity recorded successfully!')
+    toast({
+      title: 'Activity recorded',
+      description: 'Daily activity has been saved successfully.',
+    })
     
     // Reset form
     setPumpReadings([{ id: '1', pump_number: 'Pump 1', start_reading: '', end_reading: '', kg_dispensed: 0 }])
@@ -284,47 +302,67 @@ export default function GasDailyActivitiesPage() {
           <h3 className="text-lg font-semibold text-foreground">Daily Activity Records</h3>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
-                {isOwner && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>}
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pumps</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump Total</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">System</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Adjustment</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Salesperson</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Total Kg</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.length === 0 ? (
-                <tr>
-                  <td colSpan={isOwner ? 8 : 7} className="px-6 py-8 text-center">
-                    <p className="text-muted-foreground">No daily activities recorded yet</p>
-                  </td>
-                </tr>
-              ) : (
-                records.map((record) => {
-                  const branch = mockBranches.find(b => b.id === record.branch_id)
-                  return (
-                    <tr key={record.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                      <td className="px-6 py-4 text-foreground">{new Date(record.date).toLocaleDateString()}</td>
-                      {isOwner && <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>}
-                      <td className="px-6 py-4 text-foreground">{record.pump_readings.length}</td>
-                      <td className="px-6 py-4 text-foreground">{record.pump_readings.reduce((sum: number, p: any) => sum + p.kg_dispensed, 0).toFixed(2)} kg</td>
-                      <td className="px-6 py-4 text-foreground">{record.system_record_kg.toFixed(2)} kg</td>
-                      <td className="px-6 py-4 text-foreground">{record.sun_adjustment_kg.toFixed(2)} kg</td>
-                      <td className="px-6 py-4 text-foreground capitalize">{record.salesperson || 'N/A'}</td>
-                      <td className="px-6 py-4 font-semibold text-foreground">{record.total_kg.toFixed(2)} kg</td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        {records.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">No daily activities recorded yet</p>
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
+            {monthGroups.map(([monthKey, monthRecords]) => {
+              const date = new Date(monthKey + '-01')
+              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+              const monthTotal = monthRecords.reduce((sum, r) => sum + r.total_kg, 0)
+              
+              return (
+                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                  <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <span className="font-semibold">{monthName}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {monthRecords.length} activities • {monthTotal.toFixed(2)} kg
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/50">
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            {isOwner && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>}
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pumps</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump Total</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">System</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Adjustment</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Salesperson</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Total Kg</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthRecords.map((record) => {
+                            const branch = mockBranches.find(b => b.id === record.branch_id)
+                            return (
+                              <tr key={record.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                                <td className="px-6 py-4 text-foreground">{new Date(record.date).toLocaleDateString()}</td>
+                                {isOwner && <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>}
+                                <td className="px-6 py-4 text-foreground">{record.pump_readings.length}</td>
+                                <td className="px-6 py-4 text-foreground">{record.pump_readings.reduce((sum: number, p: any) => sum + p.kg_dispensed, 0).toFixed(2)} kg</td>
+                                <td className="px-6 py-4 text-foreground">{record.system_record_kg.toFixed(2)} kg</td>
+                                <td className="px-6 py-4 text-foreground">{record.sun_adjustment_kg.toFixed(2)} kg</td>
+                                <td className="px-6 py-4 text-foreground capitalize">{record.salesperson || 'N/A'}</td>
+                                <td className="px-6 py-4 font-semibold text-foreground">{record.total_kg.toFixed(2)} kg</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        )}
       </Card>
     </div>
   )

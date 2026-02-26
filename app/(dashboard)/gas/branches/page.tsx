@@ -337,7 +337,7 @@ export default function GasBranchesPage() {
       </Dialog>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Branch Details</DialogTitle>
             <DialogDescription>Overview and recent activity for this branch.</DialogDescription>

@@ -7,6 +7,7 @@ import { MetricCard } from '@/components/dashboard/metric-card'
 import { AlertCircle, TrendingDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -119,6 +120,20 @@ export default function ExpensesPage() {
     })
   }
 
+  const groupByMonth = (expenses: ExpenseItem[]) => {
+    const groups: Record<string, ExpenseItem[]> = {}
+    expenses.forEach((e) => {
+      const date = new Date(e.created_at)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(e)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(expenses)
+  const currentMonth = new Date().toISOString().slice(0, 7)
+
   const resetForm = () => {
     setFormData({
       source: 'Gas',
@@ -229,42 +244,62 @@ export default function ExpensesPage() {
           <h3 className="text-lg font-semibold text-foreground">Expense Records</h3>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Type</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {expenses.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center">
-                    <p className="text-muted-foreground">No expenses recorded yet</p>
-                  </td>
-                </tr>
-              ) : (
-                expenses.map((expense) => (
-                  <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
-                    <td className="px-6 py-4 text-foreground">{expense.source}</td>
-                    <td className="px-6 py-4">
-                      <Badge className={getCategoryColor(expense.category)}>
-                        {getCategoryLabel(expense.category)}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 text-foreground">{expense.description}</td>
-                    <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        {expenses.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">No expenses recorded yet</p>
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
+            {monthGroups.map(([monthKey, monthExpenses]) => {
+              const date = new Date(monthKey + '-01')
+              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+              const monthTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0)
+              
+              return (
+                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                  <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <span className="font-semibold">{monthName}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {monthExpenses.length} expenses • ₦{monthTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/50">
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Type</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthExpenses.map((expense) => (
+                            <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                              <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">{expense.source}</td>
+                              <td className="px-6 py-4">
+                                <Badge className={getCategoryColor(expense.category)}>
+                                  {getCategoryLabel(expense.category)}
+                                </Badge>
+                              </td>
+                              <td className="px-6 py-4 text-foreground">{expense.description}</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        )}
       </Card>
 
       <Dialog

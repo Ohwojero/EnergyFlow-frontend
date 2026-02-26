@@ -7,6 +7,7 @@ import { mockGasTransactions, mockBranches } from '@/lib/mock-data'
 import { ShoppingCart, TrendingUp, ArrowUpRight, Edit, Trash2 } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import type { GasTransaction } from '@/types'
 import { addGasSale, getAllGasSales } from '@/lib/gas-sales-store'
 import { Label } from '@/components/ui/label'
@@ -60,6 +61,20 @@ export default function GasSalesPage() {
       minute: '2-digit',
     })
   }
+
+  const groupByMonth = (transactions: SaleTransaction[]) => {
+    const groups: Record<string, SaleTransaction[]> = {}
+    transactions.forEach((t) => {
+      const date = new Date(t.created_at)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(t)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(salesTransactions)
+  const currentMonth = new Date().toISOString().slice(0, 7)
 
   const resetForm = () => {
     setFormData({
@@ -186,58 +201,78 @@ export default function GasSalesPage() {
           <h3 className="text-lg font-semibold text-foreground">Recent Sales</h3>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date & Time</th>
-                {isOwner && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>}
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Kg Sold</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Payment</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Salesperson</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Notes</th>
-                {canEditDelete && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {salesTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={isOwner ? (canEditDelete ? 8 : 7) : (canEditDelete ? 7 : 6)} className="px-6 py-8 text-center">
-                    <p className="text-muted-foreground">No sales transactions recorded yet</p>
-                  </td>
-                </tr>
-              ) : (
-                salesTransactions.map((transaction) => {
-                  const branch = mockBranches.find(b => b.id === transaction.branch_id)
-                  return (
-                    <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                      <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
-                      {isOwner && <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>}
-                      <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
-                      <td className="px-6 py-4 font-semibold text-foreground">₦{transaction.amount.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>
-                      <td className="px-6 py-4 text-foreground">{transaction.salesperson || 'N/A'}</td>
-                      <td className="px-6 py-4 text-muted-foreground text-xs">{transaction.notes}</td>
-                      {canEditDelete && (
-                        <td className="px-6 py-4">
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-8 w-8 p-0 text-red-600 hover:bg-red-50">
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        {salesTransactions.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">No sales transactions recorded yet</p>
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
+            {monthGroups.map(([monthKey, transactions]) => {
+              const date = new Date(monthKey + '-01')
+              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
+              const monthTotal = transactions.reduce((sum, t) => sum + t.amount, 0)
+              
+              return (
+                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                  <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <span className="font-semibold">{monthName}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {transactions.length} sales • ₦{monthTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/50">
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date & Time</th>
+                            {isOwner && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>}
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Kg Sold</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Payment</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Salesperson</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Notes</th>
+                            {canEditDelete && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {transactions.map((transaction) => {
+                            const branch = mockBranches.find(b => b.id === transaction.branch_id)
+                            return (
+                              <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                                <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
+                                {isOwner && <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>}
+                                <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
+                                <td className="px-6 py-4 font-semibold text-foreground">₦{transaction.amount.toLocaleString()}</td>
+                                <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>
+                                <td className="px-6 py-4 text-foreground">{transaction.salesperson || 'N/A'}</td>
+                                <td className="px-6 py-4 text-muted-foreground text-xs">{transaction.notes}</td>
+                                {canEditDelete && (
+                                  <td className="px-6 py-4">
+                                    <div className="flex gap-2">
+                                      <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                                        <Edit className="w-4 h-4" />
+                                      </Button>
+                                      <Button size="sm" variant="outline" className="h-8 w-8 p-0 text-red-600 hover:bg-red-50">
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  </td>
+                                )}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        )}
       </Card>
 
       <Dialog
