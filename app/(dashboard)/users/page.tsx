@@ -212,9 +212,7 @@ export default function UsersPage() {
                 <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Name</th>
                 <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Email</th>
                 <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Role</th>
-                {!isPersonalContext && (
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
-                )}
+                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
                 <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
                 <th className="px-6 py-3 text-right font-semibold text-muted-foreground">Actions</th>
               </tr>
@@ -231,11 +229,9 @@ export default function UsersPage() {
                       {user.role.replace(/_/g, ' ').toUpperCase()}
                     </Badge>
                   </td>
-                  {!isPersonalContext && (
-                    <td className="px-6 py-4 text-foreground">
-                      {user.assigned_branches.length} branch{user.assigned_branches.length !== 1 ? 'es' : ''}
-                    </td>
-                  )}
+                  <td className="px-6 py-4 text-foreground">
+                    {user.assigned_branches.length} branch{user.assigned_branches.length !== 1 ? 'es' : ''}
+                  </td>
                   <td className="px-6 py-4">
                     <Badge className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
                       Active

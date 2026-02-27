@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,8 +24,10 @@ export default function TenantDetailPage() {
   const params = useParams()
   const router = useRouter()
   const tenantId = params.id as string
-
-  const tenant = mockTenantsExtended.find(t => t.id === tenantId)
+  
+  const [tenants, setTenants] = useState(mockTenantsExtended)
+  
+  const tenant = tenants.find(t => t.id === tenantId)
   
   if (!tenant) {
     return (
@@ -38,6 +41,41 @@ export default function TenantDetailPage() {
         </Card>
       </div>
     )
+  }
+
+  const handleSuspend = () => {
+    if (confirm('Are you sure you want to suspend this account?')) {
+      setTenants(prev => prev.map(t => 
+        t.id === tenantId ? { ...t, status: 'suspended' as const } : t
+      ))
+    }
+  }
+
+  const handleActivate = () => {
+    if (confirm('Are you sure you want to activate this account?')) {
+      setTenants(prev => prev.map(t => 
+        t.id === tenantId ? { ...t, status: 'active' as const } : t
+      ))
+    }
+  }
+
+  const handleEditDetails = () => {
+    router.push(`/admin/tenants/${tenantId}/edit`)
+  }
+
+  const handleChangePlan = () => {
+    router.push(`/admin/tenants/${tenantId}/change-plan`)
+  }
+
+  const handleViewInvoices = () => {
+    router.push(`/admin/billing?tenant=${tenantId}`)
+  }
+
+  const handleDeleteAccount = () => {
+    if (confirm('This action is irreversible. Are you sure you want to permanently delete this account and all its data?')) {
+      setTenants(prev => prev.filter(t => t.id !== tenantId))
+      router.push('/admin/tenants')
+    }
   }
 
   const tenantLogs = mockActivityLogs.filter(log => log.tenant_id === tenantId)
@@ -192,31 +230,53 @@ export default function TenantDetailPage() {
           <h3 className="text-base md:text-lg font-semibold text-foreground mb-4 md:mb-6">Actions</h3>
           <div className="space-y-3">
             {tenant.status === 'suspended' ? (
-              <Button className="w-full bg-green-600 hover:bg-green-700 text-white text-sm">
+              <Button 
+                onClick={handleActivate} 
+                className="w-full bg-green-600 hover:bg-green-700 text-white text-sm"
+              >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Activate Account
               </Button>
             ) : (
-              <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm">
+              <Button 
+                onClick={handleSuspend} 
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm"
+              >
                 <XCircle className="w-4 h-4 mr-2" />
                 Suspend Account
               </Button>
             )}
             
-            <Button variant="outline" className="w-full text-sm">
+            <Button 
+              onClick={handleEditDetails}
+              variant="outline" 
+              className="w-full text-sm"
+            >
               <Edit className="w-4 h-4 mr-2" />
               Edit Details
             </Button>
             
-            <Button variant="outline" className="w-full text-sm">
+            <Button 
+              onClick={handleChangePlan}
+              variant="outline" 
+              className="w-full text-sm"
+            >
               Change Plan
             </Button>
             
-            <Button variant="outline" className="w-full text-sm">
+            <Button 
+              onClick={handleViewInvoices}
+              variant="outline" 
+              className="w-full text-sm"
+            >
               View Invoices
             </Button>
             
-            <Button variant="outline" className="w-full text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm">
+            <Button 
+              onClick={handleDeleteAccount}
+              variant="outline" 
+              className="w-full text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm"
+            >
               <Trash2 className="w-4 h-4 mr-2" />
               Delete Account
             </Button>

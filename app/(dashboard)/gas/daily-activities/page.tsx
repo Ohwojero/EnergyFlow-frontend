@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Swal from 'sweetalert2'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -95,9 +96,15 @@ export default function GasDailyActivitiesPage() {
     
     saveGasDailyActivity(activity)
     setRecords([activity, ...records])
-    toast({
-      title: 'Activity recorded',
-      description: 'Daily activity has been saved successfully.',
+    
+    // Sweet alert notification
+    Swal.fire({
+      icon: 'success',
+      title: 'Activity Recorded!',
+      text: 'Daily activity has been saved successfully.',
+      confirmButtonColor: '#3b82f6',
+      timer: 3000,
+      timerProgressBar: true,
     })
     
     // Reset form

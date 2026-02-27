@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { PlanSelector } from '@/components/auth/plan-selector'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Flame, Fuel, TrendingUp, Users, Lock, Zap } from 'lucide-react'
+import { Flame, Fuel, TrendingUp, Zap } from 'lucide-react'
 
 export default function LandingPage() {
   const router = useRouter()
