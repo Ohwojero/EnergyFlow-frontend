@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { mockTenantsExtended } from '@/lib/mock-data'
+import { apiService } from '@/lib/api'
 import { ArrowLeft, Building2, Check } from 'lucide-react'
 
 const PLANS = [
@@ -14,26 +14,15 @@ const PLANS = [
     name: 'Personal',
     description: 'For individual gas station operators',
     price: '₦5,000/month',
-    features: [
-      'Up to 1 branch',
-      'Basic inventory tracking',
-      'Sales reports',
-      'Email support'
-    ]
+    features: ['Up to 1 branch', 'Basic inventory tracking', 'Sales reports', 'Email support'],
   },
   {
     id: 'organisation',
     name: 'Organisation',
     description: 'For multi-branch operations',
     price: '₦25,000/month',
-    features: [
-      'Unlimited branches',
-      'Advanced analytics',
-      'Team management',
-      'Priority support',
-      'API access'
-    ]
-  }
+    features: ['Unlimited branches', 'Advanced analytics', 'Team management', 'Priority support', 'API access'],
+  },
 ]
 
 export default function ChangePlanPage() {
@@ -41,9 +30,50 @@ export default function ChangePlanPage() {
   const router = useRouter()
   const tenantId = params.id as string
 
-  const tenant = mockTenantsExtended.find(t => t.id === tenantId)
-  const [selectedPlan, setSelectedPlan] = useState<'personal' | 'organisation'>(tenant?.subscription_plan || 'personal')
+  const [tenant, setTenant] = useState<any | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const getErrorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Request failed')
+  const [selectedPlan, setSelectedPlan] = useState<'personal' | 'organisation'>('personal')
   const [isProcessing, setIsProcessing] = useState(false)
+
+  useEffect(() => {
+    const loadTenant = async () => {
+      setIsLoading(true)
+      setLoadError('')
+      try {
+        const data = await apiService.getTenantById(tenantId)
+        setTenant(data)
+        setSelectedPlan(data?.subscription_plan ?? 'personal')
+      } catch (e) {
+        setLoadError(getErrorMessage(e))
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    loadTenant()
+  }, [tenantId])
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
+        <Card className="p-6 shadow-card">
+          <p className="text-muted-foreground">Loading tenant...</p>
+        </Card>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
+        <Card className="p-6 shadow-card">
+          <p className="text-red-600">{loadError}</p>
+        </Card>
+      </div>
+    )
+  }
 
   if (!tenant) {
     return (
@@ -66,26 +96,31 @@ export default function ChangePlanPage() {
     }
 
     setIsProcessing(true)
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    alert(`Plan changed to ${selectedPlan} successfully!`)
-    setIsProcessing(false)
-    router.push(`/admin/tenants/${tenantId}`)
+    setActionError('')
+    try {
+      await apiService.changeTenantPlan(tenantId, selectedPlan)
+      router.push(`/admin/tenants/${tenantId}`)
+    } catch (e) {
+      setActionError(getErrorMessage(e))
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   return (
     <div className="flex-1 p-4 md:p-6 lg:p-8 max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-6 md:mb-8">
-        <Button 
-          variant="outline" 
-          onClick={() => router.push(`/admin/tenants/${tenantId}`)}
-          className="mb-4"
-        >
+        {actionError && (
+          <Card className="p-4 mb-4 shadow-card">
+            <p className="text-red-600">{actionError}</p>
+          </Card>
+        )}
+        <Button variant="outline" onClick={() => router.push(`/admin/tenants/${tenantId}`)} className="mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
-        
+
         <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">Change Subscription Plan</h1>
         <p className="text-muted-foreground">
           Current plan: <span className="capitalize font-semibold text-foreground">{tenant.subscription_plan}</span>
@@ -121,8 +156,8 @@ export default function ChangePlanPage() {
             </div>
 
             <ul className="space-y-3">
-              {plan.features.map((feature, idx) => (
-                <li key={idx} className="flex items-center gap-2 text-sm text-foreground">
+              {plan.features.map((feature) => (
+                <li key={feature} className="flex items-center gap-2 text-sm text-foreground">
                   <div className="w-2 h-2 rounded-full bg-primary" />
                   {feature}
                 </li>
@@ -147,9 +182,7 @@ export default function ChangePlanPage() {
             <p className="text-sm font-medium text-foreground mb-1">
               Will change to: <span className="capitalize font-bold">{selectedPlan}</span>
             </p>
-            <p className="text-xs text-muted-foreground">
-              Changes will take effect immediately
-            </p>
+            <p className="text-xs text-muted-foreground">Changes will take effect immediately</p>
           </div>
           <div className="flex gap-3 w-full sm:w-auto">
             <Button
@@ -159,11 +192,7 @@ export default function ChangePlanPage() {
             >
               {isProcessing ? 'Processing...' : 'Change Plan'}
             </Button>
-            <Button
-              onClick={() => router.push(`/admin/tenants/${tenantId}`)}
-              variant="outline"
-              className="flex-1 sm:flex-none"
-            >
+            <Button onClick={() => router.push(`/admin/tenants/${tenantId}`)} variant="outline" className="flex-1 sm:flex-none">
               Cancel
             </Button>
           </div>

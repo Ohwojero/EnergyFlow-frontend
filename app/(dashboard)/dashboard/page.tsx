@@ -1,24 +1,24 @@
 'use client'
 
 import { useAuth } from '@/context/auth-context'
-import { mockBranches, mockGasCylinders, mockGasTransactions, mockFuelProducts } from '@/lib/mock-data'
-import { getAllBranches } from '@/lib/branch-store'
-import { getAllFuelShifts } from '@/lib/fuel-shift-store'
-import { getAllGasSales } from '@/lib/gas-sales-store'
-import { QuickStats } from '@/components/dashboard/quick-stats'
-import { RecentTransactions } from '@/components/dashboard/recent-transactions'
+import { apiService } from '@/lib/api'
 import { Card } from '@/components/ui/card'
-import { Building2, Wind, Fuel, Users, TrendingUp, Package, ShoppingCart, DollarSign, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { RecentTransactions } from '@/components/dashboard/recent-transactions'
+import { Building2, Wind, Fuel, Users, Package, ShoppingCart, DollarSign, ArrowUpRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 export default function DashboardPage() {
-  const { user, selectedBranchType } = useAuth()
+  const { user, selectedBranchId, selectedBranchType } = useAuth()
   const router = useRouter()
+  const showBusinessDashboard =
+    !!user && user.role !== 'super_admin' && user.role !== 'sales_staff'
+  const isOwner = user?.role === 'org_owner'
+  const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
+  const showOperationsPanels = isOwner && !isPersonalOwner
   const hideDashboardHeaderForFuelSalesStaff =
     user?.role === 'sales_staff' && selectedBranchType === 'fuel'
 
-  // Redirect super admin to their dashboard
   useEffect(() => {
     if (user?.role === 'super_admin') {
       router.push('/admin/dashboard')
@@ -29,53 +29,131 @@ export default function DashboardPage() {
     }
   }, [user, router])
 
-  const [branches, setBranches] = useState(mockBranches)
+  const [branches, setBranches] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
   const [gasSales, setGasSales] = useState(0)
   const [fuelSales, setFuelSales] = useState(0)
+  const [gasInventoryValue, setGasInventoryValue] = useState(0)
+  const [fuelInventoryValue, setFuelInventoryValue] = useState(0)
+  const [totalExpenses, setTotalExpenses] = useState(0)
+
+  const [gasBranchRevenueMap, setGasBranchRevenueMap] = useState<Record<string, number>>({})
+  const [fuelBranchRevenueMap, setFuelBranchRevenueMap] = useState<Record<string, number>>({})
 
   useEffect(() => {
-    setBranches(getAllBranches())
-    const gasTransactions = getAllGasSales()
-    setGasSales(gasTransactions.reduce((sum, transaction) => sum + transaction.amount, 0))
-    const shifts = getAllFuelShifts()
-    setFuelSales(shifts.reduce((sum, shift) => sum + shift.sales_amount, 0))
-  }, [])
+    const load = async () => {
+      if (!user) return
+      setIsLoading(true)
+      try {
+        const allBranches = await apiService.getBranches()
+        const branchList = Array.isArray(allBranches) ? allBranches : []
 
-  // Count branches by type
-  const gasBranches = branches.filter(b => b.type === 'gas')
-  const fuelBranches = branches.filter(b => b.type === 'fuel')
+        const shouldScopeToAssigned = user.role === 'gas_manager' || user.role === 'fuel_manager'
+        const assignedSet = new Set(user.assigned_branches ?? [])
+        const scopedBranchList =
+          shouldScopeToAssigned
+            ? assignedSet.size > 0
+              ? branchList.filter((b: any) => assignedSet.has(b.id))
+              : selectedBranchId
+                ? branchList.filter((b: any) => b.id === selectedBranchId)
+                : []
+            : branchList
+
+        setBranches(scopedBranchList)
+
+        const gasBranches = scopedBranchList.filter((b: any) => b.type === 'gas')
+        const fuelBranches = scopedBranchList.filter((b: any) => b.type === 'fuel')
+
+        const [gasSalesLists, gasCylLists, gasExpenseLists, fuelRecLists, fuelProductLists, fuelExpenseLists] = await Promise.all([
+          Promise.all(gasBranches.map((b: any) => apiService.getGasSales(b.id).catch(() => []))),
+          Promise.all(gasBranches.map((b: any) => apiService.getGasCylinders(b.id).catch(() => []))),
+          Promise.all(gasBranches.map((b: any) => apiService.getGasExpenses(b.id).catch(() => []))),
+          Promise.all(fuelBranches.map((b: any) => apiService.getShiftReconciliations(b.id).catch(() => []))),
+          Promise.all(fuelBranches.map((b: any) => apiService.getFuelProducts(b.id).catch(() => []))),
+          Promise.all(fuelBranches.map((b: any) => apiService.getFuelExpenses(b.id).catch(() => []))),
+        ])
+
+        const gasRevenueMap: Record<string, number> = {}
+        gasBranches.forEach((branch: any, index: number) => {
+          const list = Array.isArray(gasSalesLists[index]) ? gasSalesLists[index] : []
+          gasRevenueMap[branch.id] = list.reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
+        })
+        setGasBranchRevenueMap(gasRevenueMap)
+
+        const fuelRevenueMap: Record<string, number> = {}
+        fuelBranches.forEach((branch: any, index: number) => {
+          const list = Array.isArray(fuelRecLists[index]) ? fuelRecLists[index] : []
+          fuelRevenueMap[branch.id] = list.reduce((sum: number, tx: any) => sum + Number(tx.sales_amount ?? 0), 0)
+        })
+        setFuelBranchRevenueMap(fuelRevenueMap)
+
+        const totalGasSales = Object.values(gasRevenueMap).reduce((sum, v) => sum + v, 0)
+        const totalFuelSales = Object.values(fuelRevenueMap).reduce((sum, v) => sum + v, 0)
+
+        const totalGasInventory = gasCylLists.flat().reduce(
+          (sum: number, cyl: any) => sum + Number(cyl.quantity ?? 0) * Number(cyl.selling_price ?? 0),
+          0
+        )
+        const totalFuelInventory = fuelProductLists.flat().reduce(
+          (sum: number, p: any) => sum + Number(p.total_value ?? 0),
+          0
+        )
+        const gasExpensesTotal = gasExpenseLists.flat().reduce(
+          (sum: number, e: any) => sum + Number(e.amount ?? 0),
+          0
+        )
+        const fuelExpensesTotal = fuelExpenseLists.flat().reduce(
+          (sum: number, e: any) => sum + Number(e.amount ?? 0),
+          0
+        )
+
+        setGasSales(totalGasSales)
+        setFuelSales(totalFuelSales)
+        setGasInventoryValue(totalGasInventory)
+        setFuelInventoryValue(totalFuelInventory)
+        setTotalExpenses(gasExpensesTotal + fuelExpensesTotal)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    load()
+  }, [user, selectedBranchId])
+
+  const gasBranches = useMemo(() => branches.filter((b) => b.type === 'gas'), [branches])
+  const fuelBranches = useMemo(() => branches.filter((b) => b.type === 'fuel'), [branches])
   const totalBranches = branches.length
-
-  // Calculate gas metrics
-  const gasInventoryValue = mockGasCylinders.reduce((sum, cyl) => 
-    sum + (cyl.quantity * cyl.selling_price), 0
-  )
-  // Calculate fuel metrics
-  const fuelInventoryValue = mockFuelProducts.reduce((sum, p) => 
-    sum + p.total_value, 0
-  )
-  // Combined metrics
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
   const totalRevenue = totalSales
+  const monthlyProfit = totalSales - totalExpenses
   const monthlyGrowth = 18.5
+  const formatMoneyShort = (amount: number) => {
+    if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
+    if (amount >= 1000) return `N${(amount / 1000).toFixed(1)}K`
+    return `N${amount.toLocaleString()}`
+  }
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      {/* Page Header */}
       {!hideDashboardHeaderForFuelSalesStaff && (
         <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
-          <p className="text-sm sm:text-base text-muted-foreground">
+          <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
+          <p className="text-muted-foreground">
             Welcome back! Here's your business performance at a glance.
           </p>
         </div>
       )}
 
-      {/* Branch Overview Cards (for Org Owner) */}
-      {user?.role === 'org_owner' && (
+      {isLoading ? (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-muted-foreground">Loading dashboard data...</p>
+        </Card>
+      ) : null}
+
+      {showBusinessDashboard && (
         <>
-          {/* Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
               <div className="flex items-start justify-between mb-4">
@@ -87,8 +165,8 @@ export default function DashboardPage() {
                   {monthlyGrowth}%
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground mb-1">Total Revenue</p>
-              <h3 className="text-3xl font-bold text-foreground">₦{(totalRevenue / 1000000).toFixed(2)}M</h3>
+              <p className="text-sm text-muted-foreground mb-1">{isOwner && !isPersonalOwner ? 'Total Revenue' : 'Total Sales'}</p>
+              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? totalRevenue : totalSales)}</h3>
               <p className="text-xs text-muted-foreground mt-2">This month</p>
             </Card>
 
@@ -103,7 +181,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-sm text-muted-foreground mb-1">Inventory Value</p>
-              <h3 className="text-3xl font-bold text-foreground">₦{(totalInventory / 1000000).toFixed(2)}M</h3>
+              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalInventory)}</h3>
               <p className="text-xs text-muted-foreground mt-2">Current stock</p>
             </Card>
 
@@ -113,9 +191,19 @@ export default function DashboardPage() {
                   <Building2 className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground mb-1">Total Branches</p>
-              <h3 className="text-3xl font-bold text-foreground">{totalBranches}</h3>
-              <p className="text-xs text-muted-foreground mt-2">{gasBranches.length} Gas, {fuelBranches.length} Fuel</p>
+              {isOwner && !isPersonalOwner ? (
+                <>
+                  <p className="text-sm text-muted-foreground mb-1">Total Branches</p>
+                  <h3 className="text-3xl font-bold text-foreground">{totalBranches}</h3>
+                  <p className="text-xs text-muted-foreground mt-2">{gasBranches.length} Gas, {fuelBranches.length} Fuel</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground mb-1">Total Expenses</p>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalExpenses)}</h3>
+                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                </>
+              )}
             </Card>
 
             <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
@@ -128,140 +216,141 @@ export default function DashboardPage() {
                   12.3%
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
-              <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000000).toFixed(2)}M</h3>
-              <p className="text-xs text-muted-foreground mt-2">This month</p>
+              {isOwner && !isPersonalOwner ? (
+                <>
+                  <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
+                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground mb-1">Profit/Month</p>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(monthlyProfit)}</h3>
+                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                </>
+              )}
             </Card>
           </div>
 
-          {/* Branch Performance */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Gas Operations */}
-            <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
-              <div className="p-5 border-b border-border">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Wind className="w-5 h-5 text-secondary" />
-                    <h3 className="text-base font-semibold text-foreground">Gas Operations</h3>
-                  </div>
-                  <button 
-                    onClick={() => router.push('/gas/branches')}
-                    className="text-xs text-primary hover:underline font-medium"
-                  >
-                    View All →
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
-                    <p className="text-base font-bold text-foreground">₦{(gasSales / 1000).toFixed(0)}K</p>
-                  </div>
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
-                    <p className="text-base font-bold text-foreground">₦{(gasInventoryValue / 1000).toFixed(0)}K</p>
-                  </div>
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
-                    <p className="text-base font-bold text-green-600">₦{((gasSales * 0.3) / 1000).toFixed(0)}K</p>
-                  </div>
-                </div>
-              </div>
-              <div className="p-5">
-                <div className="space-y-2">
-                  {gasBranches.map((branch) => (
-                    <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
-                      <div className="flex items-center gap-2 flex-1">
-                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-foreground">₦500K</span>
-                        <button 
-                          onClick={() => router.push('/gas/inventory')}
-                          className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
-                        >
-                          →
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
+          {isPersonalOwner && <RecentTransactions />}
+          {!isOwner && <RecentTransactions />}
 
-            {/* Fuel Operations */}
-            <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
-              <div className="p-5 border-b border-border">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Fuel className="w-5 h-5 text-orange-500" />
-                    <h3 className="text-base font-semibold text-foreground">Fuel Operations</h3>
+          {showOperationsPanels && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
+                <div className="p-5 border-b border-border">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Wind className="w-5 h-5 text-secondary" />
+                      <h3 className="text-base font-semibold text-foreground">Gas Operations</h3>
+                    </div>
+                    <button
+                      onClick={() => router.push('/gas/branches')}
+                      className="text-xs text-primary hover:underline font-medium"
+                    >
+                      View All →
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => router.push('/fuel/branches')}
-                    className="text-xs text-primary hover:underline font-medium"
-                  >
-                    View All →
-                  </button>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
+                      <p className="text-base font-bold text-foreground">₦{(gasSales / 1000).toFixed(0)}K</p>
+                    </div>
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
+                      <p className="text-base font-bold text-foreground">₦{(gasInventoryValue / 1000).toFixed(0)}K</p>
+                    </div>
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
+                      <p className="text-base font-bold text-green-600">₦{((gasSales * 0.3) / 1000).toFixed(0)}K</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
-                    <p className="text-base font-bold text-foreground">₦{(fuelSales / 1000).toFixed(0)}K</p>
-                  </div>
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
-                    <p className="text-base font-bold text-foreground">₦{(fuelInventoryValue / 1000).toFixed(0)}K</p>
-                  </div>
-                  <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
-                    <p className="text-base font-bold text-green-600">₦{((fuelSales * 0.25) / 1000).toFixed(0)}K</p>
-                  </div>
-                </div>
-              </div>
-              <div className="p-5">
-                <div className="space-y-2">
-                  {fuelBranches.map((branch) => (
-                    <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
-                      <div className="flex items-center gap-2 flex-1">
-                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
+                <div className="p-5">
+                  <div className="space-y-2">
+                    {gasBranches.map((branch) => (
+                      <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
+                        <div className="flex items-center gap-2 flex-1">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-foreground">₦{((gasBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0)}K</span>
+                          <button
+                            onClick={() => router.push('/gas/inventory')}
+                            className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
+                          >
+                            →
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-foreground">
-                          ₦{fuelBranches.length > 0 ? (fuelSales / fuelBranches.length / 1000).toFixed(0) : '0'}K
-                        </span>
-                        <button 
-                          onClick={() => router.push('/fuel/inventory')}
-                          className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
-                        >
-                          →
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </Card>
-          </div>
+              </Card>
+
+              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
+                <div className="p-5 border-b border-border">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Fuel className="w-5 h-5 text-orange-500" />
+                      <h3 className="text-base font-semibold text-foreground">Fuel Operations</h3>
+                    </div>
+                    <button
+                      onClick={() => router.push('/fuel/branches')}
+                      className="text-xs text-primary hover:underline font-medium"
+                    >
+                      View All →
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
+                      <p className="text-base font-bold text-foreground">₦{(fuelSales / 1000).toFixed(0)}K</p>
+                    </div>
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
+                      <p className="text-base font-bold text-foreground">₦{(fuelInventoryValue / 1000).toFixed(0)}K</p>
+                    </div>
+                    <div className="p-3 bg-muted/50 rounded-lg">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
+                      <p className="text-base font-bold text-green-600">₦{((fuelSales * 0.25) / 1000).toFixed(0)}K</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-5">
+                  <div className="space-y-2">
+                    {fuelBranches.map((branch) => (
+                      <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
+                        <div className="flex items-center gap-2 flex-1">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-foreground">₦{((fuelBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0)}K</span>
+                          <button
+                            onClick={() => router.push('/fuel/inventory')}
+                            className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
+                          >
+                            →
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
         </>
       )}
 
-      {/* Quick Stats */}
-      <QuickStats />
-
-      {/* Recent Transactions */}
-      <div className="mb-8">
-        <RecentTransactions />
-      </div>
-
-      {/* Additional Info for different roles */}
       {user?.role === 'sales_staff' && (
         <Card className="p-8 text-center border-0 shadow-card">
           <Users className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
@@ -274,3 +363,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

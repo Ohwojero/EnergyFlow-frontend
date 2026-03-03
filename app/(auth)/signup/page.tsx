@@ -7,12 +7,11 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ArrowLeft } from 'lucide-react'
-import { addBranch } from '@/lib/branch-store'
 
 function SignupForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { login } = useAuth()
+  const { register } = useAuth()
   
   const plan = (searchParams?.get('plan') || 'personal') as 'personal' | 'organisation'
   
@@ -49,48 +48,13 @@ function SignupForm() {
         return
       }
 
-      // For demo, we'll use a mock login
-      // In production, this would call your signup API
-      if (plan === 'personal') {
-        const now = Date.now()
-        const tenantId = `tenant-personal-${now}`
-        const userId = `user-personal-${now}`
-        const branchId = `branch-personal-${now}`
-
-        localStorage.setItem(
-          'energyflow_user',
-          JSON.stringify({
-            id: userId,
-            email: formData.email,
-            name: formData.name,
-            role: 'gas_manager',
-            tenant_id: tenantId,
-            assigned_branches: [branchId],
-            assigned_branch_types: ['gas'],
-            created_at: new Date().toISOString(),
-          })
-        )
-        localStorage.setItem('energyflow_branch_id', branchId)
-        localStorage.setItem('energyflow_branch_type', 'gas')
-        localStorage.setItem('energyflow_plan', 'personal')
-
-        addBranch({
-          id: branchId,
-          tenant_id: tenantId,
-          name: `${formData.businessName} Main Branch`,
-          type: 'gas',
-          location: 'Not set',
-          status: 'active',
-          manager_id: userId,
-          created_at: new Date().toISOString(),
-        })
-
-        window.location.href = '/dashboard'
-        return
-      } else {
-        localStorage.setItem('energyflow_plan', 'organisation')
-        login(formData.email, formData.password, 'org_owner')
-      }
+      await register({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        businessName: formData.businessName,
+        plan,
+      })
 
       // Redirect to dashboard
       router.push('/dashboard')

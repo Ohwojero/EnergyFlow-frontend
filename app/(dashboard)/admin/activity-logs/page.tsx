@@ -1,55 +1,92 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { mockActivityLogs } from '@/lib/mock-data'
-import { 
-  Activity, 
-  Search, 
+import { apiService } from '@/lib/api'
+import {
+  Activity,
+  Search,
   Download,
-  Filter,
   LogIn,
   Plus,
   ShoppingCart,
   AlertTriangle,
-  Package
+  Package,
 } from 'lucide-react'
 
 export default function ActivityLogsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [actionFilter, setActionFilter] = useState<string>('all')
+  const [logs, setLogs] = useState<any[]>([])
 
-  const filteredLogs = mockActivityLogs.filter(log => {
-    const matchesSearch = log.tenant_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (log.user_name && log.user_name.toLowerCase().includes(searchTerm.toLowerCase()))
+  useEffect(() => {
+    const load = async () => {
+      const data = await apiService.getAdminActivityLogs()
+      setLogs(Array.isArray(data) ? data : [])
+    }
+    load()
+  }, [])
+
+  const filteredLogs = logs.filter((log) => {
+    const tenantName = log.tenant?.name ?? ''
+    const userName = log.user?.name ?? ''
+    const matchesSearch =
+      tenantName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      userName.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesAction = actionFilter === 'all' || log.action === actionFilter
     return matchesSearch && matchesAction
   })
 
   const getActionIcon = (action: string) => {
     switch (action) {
-      case 'login': return LogIn
-      case 'create_branch': return Plus
-      case 'sale_transaction': return ShoppingCart
-      case 'account_suspended': return AlertTriangle
-      case 'inventory_update': return Package
-      default: return Activity
+      case 'login':
+        return LogIn
+      case 'create_branch':
+        return Plus
+      case 'sale_transaction':
+        return ShoppingCart
+      case 'account_suspended':
+        return AlertTriangle
+      case 'inventory_update':
+        return Package
+      default:
+        return Activity
     }
   }
 
   const getActionColor = (action: string) => {
     switch (action) {
-      case 'login': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-      case 'create_branch': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-      case 'sale_transaction': return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
-      case 'account_suspended': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-      case 'inventory_update': return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'
-      default: return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-400'
+      case 'login':
+        return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+      case 'create_branch':
+        return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+      case 'sale_transaction':
+        return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
+      case 'account_suspended':
+        return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+      case 'inventory_update':
+        return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'
+      default:
+        return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-400'
     }
   }
+
+  const totalToday = logs.filter((log) => {
+    const logDate = new Date(log.timestamp)
+    const today = new Date()
+    return logDate.toDateString() === today.toDateString()
+  }).length
+
+  const totalWeek = logs.filter((log) => {
+    const logDate = new Date(log.timestamp)
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    return logDate > weekAgo
+  }).length
+
+  const criticalCount = logs.filter((log) => log.action === 'account_suspended').length
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
@@ -60,9 +97,7 @@ export default function ActivityLogsPage() {
             <Activity className="w-8 h-8 text-primary" />
             Activity Logs
           </h1>
-          <p className="text-muted-foreground">
-            Monitor system-wide activities and events
-          </p>
+          <p className="text-muted-foreground">Monitor system-wide activities and events</p>
         </div>
         <Button className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
           <Download className="w-4 h-4" />
@@ -74,33 +109,19 @@ export default function ActivityLogsPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card className="p-4 shadow-card">
           <p className="text-sm text-muted-foreground mb-1">Total Events</p>
-          <p className="text-2xl font-bold text-foreground">{mockActivityLogs.length}</p>
+          <p className="text-2xl font-bold text-foreground">{logs.length}</p>
         </Card>
         <Card className="p-4 shadow-card">
           <p className="text-sm text-muted-foreground mb-1">Today</p>
-          <p className="text-2xl font-bold text-foreground">
-            {mockActivityLogs.filter(log => {
-              const logDate = new Date(log.timestamp)
-              const today = new Date()
-              return logDate.toDateString() === today.toDateString()
-            }).length}
-          </p>
+          <p className="text-2xl font-bold text-foreground">{totalToday}</p>
         </Card>
         <Card className="p-4 shadow-card">
           <p className="text-sm text-muted-foreground mb-1">This Week</p>
-          <p className="text-2xl font-bold text-foreground">
-            {mockActivityLogs.filter(log => {
-              const logDate = new Date(log.timestamp)
-              const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-              return logDate > weekAgo
-            }).length}
-          </p>
+          <p className="text-2xl font-bold text-foreground">{totalWeek}</p>
         </Card>
         <Card className="p-4 shadow-card">
           <p className="text-sm text-muted-foreground mb-1">Critical Events</p>
-          <p className="text-2xl font-bold text-red-600">
-            {mockActivityLogs.filter(log => log.action === 'account_suspended').length}
-          </p>
+          <p className="text-2xl font-bold text-red-600">{criticalCount}</p>
         </Card>
       </div>
 
@@ -164,20 +185,16 @@ export default function ActivityLogsPage() {
                       {new Date(log.timestamp).toLocaleString()}
                     </td>
                     <td className="px-6 py-4">
-                      <p className="font-medium text-foreground">{log.tenant_name}</p>
+                      <p className="font-medium text-foreground">{log.tenant?.name ?? '-'}</p>
                     </td>
-                    <td className="px-6 py-4 text-foreground">
-                      {log.user_name || '-'}
-                    </td>
+                    <td className="px-6 py-4 text-foreground">{log.user?.name ?? '-'}</td>
                     <td className="px-6 py-4">
                       <Badge className={getActionColor(log.action)}>
                         <ActionIcon className="w-3 h-3 mr-1" />
-                        {log.action.replace(/_/g, ' ')}
+                        {String(log.action).replace(/_/g, ' ')}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4 text-foreground">
-                      {log.description}
-                    </td>
+                    <td className="px-6 py-4 text-foreground">{log.description}</td>
                     <td className="px-6 py-4 text-muted-foreground font-mono text-xs">
                       {log.ip_address}
                     </td>
@@ -192,9 +209,7 @@ export default function ActivityLogsPage() {
           <div className="p-12 text-center">
             <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
             <h3 className="text-lg font-semibold text-foreground mb-2">No Logs Found</h3>
-            <p className="text-muted-foreground">
-              Try adjusting your search or filter criteria
-            </p>
+            <p className="text-muted-foreground">Try adjusting your search or filter criteria</p>
           </div>
         )}
       </Card>

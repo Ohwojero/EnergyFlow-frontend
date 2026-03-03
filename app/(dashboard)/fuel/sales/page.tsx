@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,9 +9,8 @@ import { ShoppingCart, TrendingUp, ArrowUpRight } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
-import type { ShiftReconciliation } from '@/types'
-import { addFuelShift, getAllFuelShifts } from '@/lib/fuel-shift-store'
-import { mockBranches } from '@/lib/mock-data'
+import type { Branch, ShiftReconciliation } from '@/types'
+import { apiService } from '@/lib/api'
 import {
   Dialog,
   DialogContent,
@@ -36,54 +35,110 @@ type ShiftEntry = ShiftReconciliation & {
 export default function FuelSalesPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
-  const isFuelManager = user?.role === 'fuel_manager'
 
-  // Get user's assigned branches for fuel operations
-  const userFuelBranches = user?.assigned_branches.filter(
-    (branchId) => mockBranches.find((b) => b.id === branchId && b.type === 'fuel')
-  ) || []
-
-  // Get current branch info
-  const currentBranchInfo = selectedBranchId
-    ? mockBranches.find((b) => b.id === selectedBranchId)
-    : null
-
+  const [branches, setBranches] = useState<Branch[]>([])
   const [shifts, setShifts] = useState<ShiftEntry[]>([])
   const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(selectedBranchId)
-
-  useEffect(() => {
-    const baseShifts = getAllFuelShifts()
-    const effectiveBranchId = isOwner ? localSelectedBranchId : selectedBranchId
-    
-    const scopedShifts =
-      isOwner && !localSelectedBranchId
-        ? baseShifts
-        : baseShifts.filter((shift) => shift.branch_id === effectiveBranchId)
-
-    setShifts(
-      scopedShifts.map((shift) => {
-        const branch = mockBranches.find((b) => b.id === shift.branch_id)
-        return {
-          ...shift,
-          sales_staff_name: (shift as ShiftEntry).sales_staff_name || 'Unassigned',
-          branch_name: branch?.name || 'Unknown Branch',
-        }
-      })
-    )
-  }, [isOwner, selectedBranchId, localSelectedBranchId])
+  const [isLoading, setIsLoading] = useState(true)
 
   const [isRecordShiftOpen, setIsRecordShiftOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     shift_number: '1',
-    pump_id: 'pump-1',
+    pump_id: '',
     sales_staff_name: '',
-    start_reading: '12500',
-    end_reading: '12900',
-    sales_amount: '260000',
+    start_reading: '0',
+    end_reading: '0',
+    sales_amount: '',
     date: new Date().toISOString().slice(0, 10),
     time: new Date().toTimeString().slice(0, 5),
   })
+
+  const userFuelBranches = useMemo(
+    () => branches.filter((branch) => user?.assigned_branches?.includes(branch.id)),
+    [branches, user?.assigned_branches],
+  )
+
+  const currentBranchInfo = useMemo(() => {
+    const branchId = isOwner ? localSelectedBranchId : selectedBranchId
+    return branchId ? branches.find((branch) => branch.id === branchId) : null
+  }, [branches, isOwner, localSelectedBranchId, selectedBranchId])
+
+  const normalizeShift = (raw: any, fallbackBranchId?: string): ShiftEntry => ({
+    id: raw.id,
+    branch_id: raw.branch_id ?? raw.branch?.id ?? fallbackBranchId ?? '',
+    shift_number: Number(raw.shift_number ?? 0),
+    pump_id: raw.pump_id ?? raw.pump?.id ?? '',
+    start_reading: Number(raw.start_reading ?? 0),
+    end_reading: Number(raw.end_reading ?? 0),
+    sales_amount: Number(raw.sales_amount ?? 0),
+    variance: Number(raw.variance ?? 0),
+    created_at: raw.created_at ?? new Date().toISOString(),
+    sales_staff_name: raw.sales_staff_name ?? 'Unassigned',
+    branch_name: raw.branch_name ?? raw.branch?.name,
+  })
+
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const data = await apiService.getFuelBranches()
+        setBranches(Array.isArray(data) ? data : [])
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Could not load fuel branches.',
+        })
+      }
+    }
+    loadBranches()
+  }, [])
+
+  useEffect(() => {
+    const loadShifts = async () => {
+      setIsLoading(true)
+      try {
+        if (isOwner) {
+          const targetBranchIds = localSelectedBranchId
+            ? [localSelectedBranchId]
+            : branches.map((branch) => branch.id)
+          const responses = await Promise.all(
+            targetBranchIds.map(async (branchId) => {
+              const list = await apiService.getShiftReconciliations(branchId)
+              return (Array.isArray(list) ? list : []).map((item) => normalizeShift(item, branchId))
+            }),
+          )
+          const all = responses.flat().sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+          )
+          setShifts(all)
+          return
+        }
+
+        const fallbackBranchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
+        if (!fallbackBranchId) {
+          setShifts([])
+          return
+        }
+        const list = await apiService.getShiftReconciliations(fallbackBranchId)
+        const normalized = (Array.isArray(list) ? list : []).map((item) =>
+          normalizeShift(item, fallbackBranchId),
+        )
+        setShifts(normalized)
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Could not load fuel shifts.',
+        })
+        setShifts([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    if (branches.length > 0 || selectedBranchId || isOwner) {
+      loadShifts()
+    }
+  }, [branches, isOwner, localSelectedBranchId, selectedBranchId, user?.assigned_branches])
 
   useEffect(() => {
     setFormData((prev) => ({
@@ -97,24 +152,28 @@ export default function FuelSalesPage() {
 
   const totalSales = shifts.reduce((sum, shift) => sum + shift.sales_amount, 0)
   const avgShiftSales = shifts.length > 0 ? totalSales / shifts.length : 0
+  const formatMoneyShort = (amount: number) => {
+    if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
+    if (amount >= 1000) return `N${(amount / 1000).toFixed(1)}K`
+    return `N${amount.toLocaleString()}`
+  }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-NG', {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('en-NG', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
     })
-  }
 
-  const groupByMonth = (shifts: ShiftEntry[]) => {
+  const groupByMonth = (entries: ShiftEntry[]) => {
     const groups: Record<string, ShiftEntry[]> = {}
-    shifts.forEach((s) => {
-      const date = new Date(s.created_at)
+    entries.forEach((entry) => {
+      const date = new Date(entry.created_at)
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
       if (!groups[key]) groups[key] = []
-      groups[key].push(s)
+      groups[key].push(entry)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
@@ -125,17 +184,17 @@ export default function FuelSalesPage() {
   const resetForm = () => {
     setFormData({
       shift_number: String((shifts[0]?.shift_number ?? 0) + 1),
-      pump_id: shifts[0]?.pump_id ?? 'pump-1',
+      pump_id: shifts[0]?.pump_id ?? '',
       sales_staff_name: '',
-      start_reading: String(shifts[0]?.end_reading ?? 12500),
-      end_reading: String((shifts[0]?.end_reading ?? 12500) + 400),
-      sales_amount: '260000',
+      start_reading: String(shifts[0]?.end_reading ?? 0),
+      end_reading: String((shifts[0]?.end_reading ?? 0) + 400),
+      sales_amount: '',
       date: new Date().toISOString().slice(0, 10),
       time: new Date().toTimeString().slice(0, 5),
     })
   }
 
-  const handleSaveShift = (e: FormEvent) => {
+  const handleSaveShift = async (e: FormEvent) => {
     e.preventDefault()
     const shiftNumber = Number(formData.shift_number)
     const startReading = Number(formData.start_reading)
@@ -144,7 +203,6 @@ export default function FuelSalesPage() {
 
     if (
       !shiftNumber ||
-      !formData.pump_id.trim() ||
       !formData.sales_staff_name.trim() ||
       !salesAmount ||
       !formData.date ||
@@ -152,7 +210,7 @@ export default function FuelSalesPage() {
     ) {
       toast({
         title: 'Missing details',
-        description: 'Shift, pump, assigned staff, sales amount, date, and time are required.',
+        description: 'Shift, assigned staff, sales amount, date, and time are required.',
       })
       return
     }
@@ -179,22 +237,33 @@ export default function FuelSalesPage() {
       return
     }
 
+    const branchId =
+      selectedBranchId ?? user?.assigned_branches?.[0] ?? currentBranchInfo?.id ?? branches[0]?.id
+    if (!branchId) {
+      toast({
+        title: 'Missing branch',
+        description: 'Select a branch before recording shift.',
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      const nextShift: ShiftEntry = {
-        id: `shift-${Date.now()}`,
-        branch_id: selectedBranchId ?? shifts[0]?.branch_id ?? 'branch-3',
+      const created = await apiService.createShiftReconciliation({
+        branch_id: branchId,
+        pump_id: formData.pump_id.trim() || undefined,
         shift_number: shiftNumber,
-        pump_id: formData.pump_id.trim(),
-        sales_staff_name: formData.sales_staff_name.trim(),
         start_reading: startReading,
         end_reading: endReading,
         sales_amount: salesAmount,
         variance: 0,
-        created_at: new Date(`${formData.date}T${formData.time}:00`).toISOString(),
-      }
+      })
 
-      addFuelShift(nextShift)
+      const nextShift = normalizeShift(created, branchId)
+      nextShift.branch_name = branches.find((branch) => branch.id === branchId)?.name
+      nextShift.sales_staff_name = formData.sales_staff_name.trim()
+      nextShift.created_at = new Date(`${formData.date}T${formData.time}:00`).toISOString()
+
       setShifts((prev) => [nextShift, ...prev])
       toast({
         title: 'Shift recorded',
@@ -202,6 +271,11 @@ export default function FuelSalesPage() {
       })
       setIsRecordShiftOpen(false)
       resetForm()
+    } catch (error) {
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Could not record fuel shift.',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -229,7 +303,6 @@ export default function FuelSalesPage() {
         )}
       </div>
 
-      {/* Branch Selector for Owners or Multi-Branch Users */}
       {(isOwner || userFuelBranches.length > 1) && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
           <div className="flex items-center gap-4">
@@ -241,22 +314,18 @@ export default function FuelSalesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Branches</SelectItem>
-                  {mockBranches
-                    .filter((b) => b.type === 'fuel')
-                    .map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.location})
-                      </SelectItem>
-                    ))}
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name} ({branch.location})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-            ) : userFuelBranches.length > 1 ? (
-              <div>
-                <p className="text-sm text-muted-foreground">
-                  {currentBranchInfo?.name} • {currentBranchInfo?.location}
-                </p>
-              </div>
-            ) : null}
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {currentBranchInfo?.name} • {currentBranchInfo?.location}
+              </p>
+            )}
           </div>
         </Card>
       )}
@@ -273,7 +342,7 @@ export default function FuelSalesPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000000).toFixed(2)}M</h3>
+          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">This period</p>
         </Card>
 
@@ -284,7 +353,7 @@ export default function FuelSalesPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Avg Shift Sales</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(avgShiftSales / 1000).toFixed(0)}K</h3>
+          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(avgShiftSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">Per shift</p>
         </Card>
 
@@ -305,7 +374,9 @@ export default function FuelSalesPage() {
           <h3 className="text-lg font-semibold text-foreground">Shift Reconciliation</h3>
         </div>
 
-        {shifts.length === 0 ? (
+        {isLoading ? (
+          <div className="px-6 py-8 text-center text-muted-foreground">Loading shifts...</div>
+        ) : shifts.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No shift records yet</p>
           </div>
@@ -315,14 +386,14 @@ export default function FuelSalesPage() {
               const date = new Date(monthKey + '-01')
               const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
               const monthTotal = monthShifts.reduce((sum, s) => sum + s.sales_amount, 0)
-              
+
               return (
                 <AccordionItem key={monthKey} value={monthKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
                       <span className="font-semibold">{monthName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthShifts.length} shifts • ₦{monthTotal.toLocaleString()}
+                        {monthShifts.length} shifts • N{monthTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -345,13 +416,15 @@ export default function FuelSalesPage() {
                           {monthShifts.map((shift) => (
                             <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(shift.created_at)}</td>
-                              <td className="px-6 py-4 font-medium text-foreground">{shift.branch_name}</td>
+                              <td className="px-6 py-4 font-medium text-foreground">
+                                {shift.branch_name ?? branches.find((b) => b.id === shift.branch_id)?.name ?? 'Unknown Branch'}
+                              </td>
                               <td className="px-6 py-4 font-medium text-foreground">Shift {shift.shift_number}</td>
-                              <td className="px-6 py-4 text-foreground">{shift.pump_id}</td>
+                              <td className="px-6 py-4 text-foreground">{shift.pump_id || 'N/A'}</td>
                               <td className="px-6 py-4 text-foreground">{shift.sales_staff_name}</td>
                               <td className="px-6 py-4 text-foreground">{shift.start_reading}</td>
                               <td className="px-6 py-4 text-foreground">{shift.end_reading}</td>
-                              <td className="px-6 py-4 font-semibold text-foreground">₦{shift.sales_amount.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">N{shift.sales_amount.toLocaleString()}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -391,12 +464,12 @@ export default function FuelSalesPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="pump_id">Pump</Label>
+              <Label htmlFor="pump_id">Pump (Optional)</Label>
               <Input
                 id="pump_id"
                 value={formData.pump_id}
                 onChange={(e) => setFormData((prev) => ({ ...prev, pump_id: e.target.value }))}
-                placeholder="e.g. pump-1"
+                placeholder="Fuel pump ID"
               />
             </div>
 

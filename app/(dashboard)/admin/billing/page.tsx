@@ -1,74 +1,47 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { mockTenantsExtended } from '@/lib/mock-data'
-import { 
-  DollarSign, 
+import { apiService } from '@/lib/api'
+import {
+  DollarSign,
   TrendingUp,
   CreditCard,
   AlertCircle,
   CheckCircle,
   Download,
-  Calendar
 } from 'lucide-react'
 
 export default function BillingPage() {
-  const tenants = mockTenantsExtended.filter(t => t.id !== 'tenant-1')
-  
-  const totalRevenue = tenants.reduce((sum, t) => sum + t.monthly_revenue, 0)
-  const activeSubscriptions = tenants.filter(t => t.status === 'active').length
-  const failedPayments = tenants.filter(t => t.status === 'suspended').length
-  
-  // Mock payment data
-  const recentPayments = [
-    {
-      id: 'pay-1',
-      tenant: 'Gas & Fuel Solutions Ltd',
-      amount: 49999,
-      plan: 'Organisation',
-      status: 'paid',
-      date: new Date().toISOString(),
-      invoice: 'INV-2024-001'
-    },
-    {
-      id: 'pay-2',
-      tenant: 'Metro Gas Distribution',
-      amount: 29999,
-      plan: 'Organisation',
-      status: 'paid',
-      date: new Date(Date.now() - 86400000).toISOString(),
-      invoice: 'INV-2024-002'
-    },
-    {
-      id: 'pay-3',
-      tenant: 'QuickFuel Stations',
-      amount: 9999,
-      plan: 'Personal',
-      status: 'paid',
-      date: new Date(Date.now() - 172800000).toISOString(),
-      invoice: 'INV-2024-003'
-    },
-    {
-      id: 'pay-4',
-      tenant: 'Energy Hub Nigeria',
-      amount: 49999,
-      plan: 'Organisation',
-      status: 'failed',
-      date: new Date(Date.now() - 604800000).toISOString(),
-      invoice: 'INV-2024-004'
-    },
-    {
-      id: 'pay-5',
-      tenant: 'Prime Gas & Oil',
-      amount: 9999,
-      plan: 'Personal',
-      status: 'paid',
-      date: new Date(Date.now() - 259200000).toISOString(),
-      invoice: 'INV-2024-005'
-    },
-  ]
+  const [tenants, setTenants] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
+
+  useEffect(() => {
+    const load = async () => {
+      const [tenantData, billingData] = await Promise.all([
+        apiService.getTenants(),
+        apiService.getAdminBilling(),
+      ])
+      setTenants(Array.isArray(tenantData) ? tenantData : [])
+      setPayments(Array.isArray(billingData) ? billingData : [])
+    }
+    load()
+  }, [])
+
+  const totalRevenue = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
+  const activeSubscriptions = tenants.filter((t) => t.status === 'active').length
+  const failedPayments = payments.filter((p) => p.status === 'failed').length
+
+  const orgTenants = tenants.filter((t) => t.subscription_plan === 'organisation')
+  const personalTenants = tenants.filter((t) => t.subscription_plan === 'personal')
+  const orgRevenue = payments
+    .filter((p) => p.plan_type === 'organisation')
+    .reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
+  const personalRevenue = payments
+    .filter((p) => p.plan_type === 'personal')
+    .reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
@@ -79,9 +52,7 @@ export default function BillingPage() {
             <DollarSign className="w-8 h-8 text-primary" />
             Billing & Revenue
           </h1>
-          <p className="text-muted-foreground">
-            Track subscriptions, payments, and revenue
-          </p>
+          <p className="text-muted-foreground">Track subscriptions, payments, and revenue</p>
         </div>
         <Button className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
           <Download className="w-4 h-4" />
@@ -137,15 +108,11 @@ export default function BillingPage() {
               <h4 className="text-lg font-bold text-foreground">Organisation Plan</h4>
               <Badge className="bg-blue-600 text-white">Premium</Badge>
             </div>
-            <p className="text-3xl font-bold text-foreground mb-2">
-              {tenants.filter(t => t.subscription_plan === 'organisation').length}
-            </p>
+            <p className="text-3xl font-bold text-foreground mb-2">{orgTenants.length}</p>
             <p className="text-sm text-muted-foreground mb-4">Active subscriptions</p>
             <div className="pt-4 border-t border-border">
               <p className="text-sm text-muted-foreground">Monthly Revenue</p>
-              <p className="text-xl font-bold text-foreground">
-                ₦{(tenants.filter(t => t.subscription_plan === 'organisation').reduce((sum, t) => sum + t.monthly_revenue, 0) / 1000).toFixed(0)}K
-              </p>
+              <p className="text-xl font-bold text-foreground">₦{(orgRevenue / 1000).toFixed(0)}K</p>
             </div>
           </div>
 
@@ -154,15 +121,11 @@ export default function BillingPage() {
               <h4 className="text-lg font-bold text-foreground">Personal Plan</h4>
               <Badge className="bg-orange-600 text-white">Basic</Badge>
             </div>
-            <p className="text-3xl font-bold text-foreground mb-2">
-              {tenants.filter(t => t.subscription_plan === 'personal').length}
-            </p>
+            <p className="text-3xl font-bold text-foreground mb-2">{personalTenants.length}</p>
             <p className="text-sm text-muted-foreground mb-4">Active subscriptions</p>
             <div className="pt-4 border-t border-border">
               <p className="text-sm text-muted-foreground">Monthly Revenue</p>
-              <p className="text-xl font-bold text-foreground">
-                ₦{(tenants.filter(t => t.subscription_plan === 'personal').reduce((sum, t) => sum + t.monthly_revenue, 0) / 1000).toFixed(0)}K
-              </p>
+              <p className="text-xl font-bold text-foreground">₦{(personalRevenue / 1000).toFixed(0)}K</p>
             </div>
           </div>
         </div>
@@ -190,27 +153,29 @@ export default function BillingPage() {
               </tr>
             </thead>
             <tbody>
-              {recentPayments.map((payment) => (
+              {payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                   <td className="px-6 py-4">
-                    <p className="font-mono text-foreground">{payment.invoice}</p>
+                    <p className="font-mono text-foreground">{payment.invoice_number}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <p className="font-medium text-foreground">{payment.tenant}</p>
+                    <p className="font-medium text-foreground">{payment.tenant?.name ?? '-'}</p>
                   </td>
-                  <td className="px-6 py-4 text-foreground">{payment.plan}</td>
+                  <td className="px-6 py-4 text-foreground">{payment.plan_type}</td>
                   <td className="px-6 py-4">
-                    <p className="font-semibold text-foreground">₦{payment.amount.toLocaleString()}</p>
+                    <p className="font-semibold text-foreground">₦{Number(payment.amount ?? 0).toLocaleString()}</p>
                   </td>
                   <td className="px-6 py-4 text-muted-foreground">
-                    {new Date(payment.date).toLocaleDateString()}
+                    {new Date(payment.payment_date).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4">
-                    <Badge className={
-                      payment.status === 'paid'
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                        : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                    }>
+                    <Badge
+                      className={
+                        payment.status === 'paid'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                          : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                      }
+                    >
                       {payment.status === 'paid' ? (
                         <CheckCircle className="w-3 h-3 mr-1" />
                       ) : (

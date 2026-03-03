@@ -14,24 +14,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
-import {
-  mockBranches,
-  mockFuelProducts,
-  mockShiftReconciliation,
-  mockUsers,
-} from '@/lib/mock-data'
-import {
-  addBranch,
-  getAllBranches,
-  removeBranch,
-  updateBranch,
-} from '@/lib/branch-store'
+import { apiService } from '@/lib/api'
+import { useAuth } from '@/context/auth-context'
 import {
   Archive,
   Eye,
@@ -44,12 +40,15 @@ import {
 } from 'lucide-react'
 
 export default function FuelBranchesPage() {
-  const [branches, setBranches] = useState(mockBranches)
-  const fuelBranches = useMemo(
-    () => branches.filter((branch) => branch.type === 'fuel'),
-    [branches]
-  )
+  const { user } = useAuth()
+  const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const [branches, setBranches] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
+  const [fuelProducts, setFuelProducts] = useState<any[]>([])
+  const [shiftReconciliations, setShiftReconciliations] = useState<any[]>([])
 
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
@@ -69,15 +68,56 @@ export default function FuelBranchesPage() {
     status: 'active' as 'active' | 'inactive',
   })
 
+  const fuelBranches = useMemo(
+    () => branches.filter((branch) => branch.type === 'fuel'),
+    [branches]
+  )
+
+  const getErrorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Request failed')
+
+  const loadData = async () => {
+    setIsLoading(true)
+    setError('')
+    try {
+      const [branchData, userData] = await Promise.all([
+        apiService.getBranchesByType('fuel'),
+        apiService.getUsers().catch(() => []),
+      ])
+      const branchList = Array.isArray(branchData) ? branchData : []
+      setBranches(branchList)
+      setUsers(Array.isArray(userData) ? userData : [])
+
+      const [productsLists, reconciliationLists] = await Promise.all([
+        Promise.all(branchList.map((b: any) => apiService.getFuelProducts(b.id).catch(() => []))),
+        Promise.all(branchList.map((b: any) => apiService.getShiftReconciliations(b.id).catch(() => []))),
+      ])
+      setFuelProducts(productsLists.flat())
+      setShiftReconciliations(reconciliationLists.flat())
+    } catch (e) {
+      setError(getErrorMessage(e))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   useEffect(() => {
-    setBranches(getAllBranches())
+    loadData()
   }, [])
 
-  const getManagerName = (managerId: string) => {
+  const getManagerName = (branch: any) => {
+    const typedManagerName = String(branch?.manager_name ?? '').trim()
+    if (typedManagerName) return typedManagerName
+    const managerId =
+      branch?.manager?.id ??
+      branch?.manager?.user_id ??
+      branch?.manager_id ??
+      branch?.managerId
     if (!managerId || managerId === 'unassigned') return 'Unassigned'
-    const match = Object.values(mockUsers).find((user) => user.id === managerId)
+    const match = users.find((user) => user.id === managerId)
     if (match?.name) return match.name
-    return managerId
+    if (branch?.manager?.name) return branch.manager.name
+    if (branch?.manager?.email) return branch.manager.email
+    return 'Unassigned'
   }
 
   const selectedBranch = useMemo(
@@ -85,18 +125,25 @@ export default function FuelBranchesPage() {
     [branches, selectedBranchId]
   )
 
+  const belongsToSelectedBranch = (record: any) => {
+    if (!selectedBranch) return false
+    const recordBranchId =
+      record?.branch?.id ?? record?.branch_id ?? record?.branchId ?? null
+    return String(recordBranchId ?? '') === String(selectedBranch.id)
+  }
+
   const branchInventoryValue = selectedBranch
-    ? mockFuelProducts
-        .filter((product) => product.branch_id === selectedBranch.id)
-        .reduce((sum, product) => sum + product.total_value, 0)
+    ? fuelProducts
+        .filter((product) => belongsToSelectedBranch(product))
+        .reduce((sum, product) => sum + Number(product.total_value ?? 0), 0)
     : 0
   const branchSalesValue = selectedBranch
-    ? mockShiftReconciliation
-        .filter((shift) => shift.branch_id === selectedBranch.id)
-        .reduce((sum, shift) => sum + shift.sales_amount, 0)
+    ? shiftReconciliations
+        .filter((shift) => belongsToSelectedBranch(shift))
+        .reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
     : 0
   const branchShifts = selectedBranch
-    ? mockShiftReconciliation.filter((shift) => shift.branch_id === selectedBranch.id)
+    ? shiftReconciliations.filter((shift) => belongsToSelectedBranch(shift))
     : []
 
   const openDetails = (branchId: string) => {
@@ -111,65 +158,93 @@ export default function FuelBranchesPage() {
     setEditData({
       name: branch.name,
       location: branch.location,
-      managerName: getManagerName(branch.manager_id),
+      managerName: getManagerName(branch),
       status: branch.status,
     })
     setIsEditOpen(true)
   }
 
-  const handleArchive = (branchId: string) => {
-    const branch = branches.find((b) => b.id === branchId)
-    if (!branch) return
-    const updated = { ...branch, status: 'inactive' as const }
-    updateBranch(updated)
-    setBranches((prev) => prev.map((b) => (b.id === branchId ? updated : b)))
-    toast({ title: 'Station archived', description: `${branch.name} marked inactive.` })
+  const handleArchive = async (branchId: string) => {
+    try {
+      await apiService.archiveBranch(branchId)
+      await loadData()
+      toast({
+        title: 'Station archived',
+        description: 'Station status has been set to inactive.',
+      })
+    } catch (e) {
+      toast({
+        title: 'Archive failed',
+        description: getErrorMessage(e),
+      })
+    }
   }
 
-  const handleDelete = (branchId: string) => {
-    const branch = branches.find((b) => b.id === branchId)
-    if (!branch) return
-    removeBranch(branchId)
-    setBranches((prev) => prev.filter((b) => b.id !== branchId))
-    toast({ title: 'Station deleted', description: `${branch.name} removed.` })
+  const handleDelete = async (branchId: string) => {
+    if (!window.confirm('Delete this station? This action cannot be undone.')) {
+      return
+    }
+    try {
+      await apiService.deleteBranch(branchId)
+      await loadData()
+      toast({
+        title: 'Station deleted',
+        description: 'Station has been removed successfully.',
+      })
+    } catch (e) {
+      toast({
+        title: 'Delete failed',
+        description: getErrorMessage(e),
+      })
+    }
   }
 
-  const handleCreateBranch = (event: React.FormEvent) => {
+  const handleCreateBranch = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!formData.name.trim() || !formData.location.trim()) {
+    if (!formData.name.trim() || !formData.location.trim() || !formData.managerName.trim()) {
       toast({
         title: 'Missing details',
-        description: 'Station name and location are required.',
+        description: 'Station name, location, and manager name are required.',
       })
       return
     }
 
     setIsSubmitting(true)
-    setTimeout(() => {
-      const newBranch = {
-        id: `branch-${Date.now()}`,
-        tenant_id: 'tenant-2',
+    try {
+      const currentUserId = (user as any)?.id ?? (user as any)?.user_id ?? null
+      await apiService.createBranch({
         name: formData.name.trim(),
-        type: 'fuel' as const,
+        type: 'fuel',
         location: formData.location.trim(),
-        status: 'active' as const,
-        manager_id: formData.managerName.trim() || 'unassigned',
-        created_at: new Date().toISOString(),
-      }
-      addBranch(newBranch)
-      setBranches((prev) => [newBranch, ...prev])
-      setIsSubmitting(false)
+        manager_name: formData.managerName.trim(),
+        ...(currentUserId ? { manager_id: currentUserId } : {}),
+      })
+      await loadData()
       setIsCreateOpen(false)
       setFormData({ name: '', location: '', managerName: '' })
       toast({
         title: 'Station created',
-        description: 'Your fuel station has been added (mock).',
+        description: 'Your fuel station has been added.',
       })
-    }, 400)
+    } catch (e) {
+      toast({
+        title: 'Failed to create station',
+        description: getErrorMessage(e),
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
+      {isPersonalOwner && (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-muted-foreground">
+            Personal plan does not support branch management.
+          </p>
+        </Card>
+      )}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
@@ -178,10 +253,22 @@ export default function FuelBranchesPage() {
           </h1>
           <p className="text-muted-foreground">Manage and monitor all fuel distribution stations</p>
         </div>
-        <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setIsCreateOpen(true)}>
+        <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setIsCreateOpen(true)} disabled={isPersonalOwner}>
           Create Station
         </Button>
       </div>
+
+      {error && (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-red-600">{error}</p>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-muted-foreground">Loading fuel stations...</p>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {fuelBranches.map((branch) => (
@@ -243,7 +330,7 @@ export default function FuelBranchesPage() {
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Manager</p>
-                  <p className="text-sm text-foreground">{getManagerName(branch.manager_id)}</p>
+                  <p className="text-sm text-foreground">{getManagerName(branch)}</p>
                 </div>
               </div>
             </div>
@@ -266,7 +353,7 @@ export default function FuelBranchesPage() {
         ))}
       </div>
 
-      {fuelBranches.length === 0 && (
+      {fuelBranches.length === 0 && !isLoading && (
         <Card className="p-12 text-center shadow-card">
           <Fuel className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
           <h3 className="text-lg font-semibold text-foreground mb-2">No Fuel Stations</h3>
@@ -303,7 +390,7 @@ export default function FuelBranchesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="fuel-branch-manager">Manager Name (optional)</Label>
+              <Label htmlFor="fuel-branch-manager">Manager Name</Label>
               <Input
                 id="fuel-branch-manager"
                 placeholder="Fuel Station Manager"
@@ -324,7 +411,7 @@ export default function FuelBranchesPage() {
       </Dialog>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Station Details</DialogTitle>
             <DialogDescription>Overview and recent activity for this station.</DialogDescription>
@@ -339,7 +426,7 @@ export default function FuelBranchesPage() {
                 </div>
                 <div className="rounded-lg border border-border/60 p-4">
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Manager</p>
-                  <p className="text-base font-semibold text-foreground">{getManagerName(selectedBranch.manager_id)}</p>
+                  <p className="text-base font-semibold text-foreground">{getManagerName(selectedBranch)}</p>
                   <p className="text-sm text-muted-foreground capitalize">{selectedBranch.status}</p>
                 </div>
               </div>
@@ -357,24 +444,32 @@ export default function FuelBranchesPage() {
                   <p className="text-lg font-semibold text-foreground">{branchShifts.length}</p>
                 </div>
               </div>
-              <div className="rounded-lg border border-border/60">
-                <div className="px-4 py-3 border-b border-border/60">
-                  <h4 className="text-sm font-semibold text-foreground">Recent Shifts</h4>
-                </div>
-                <div className="divide-y divide-border/60">
-                  {branchShifts.slice(0, 5).map((shift) => (
-                    <div key={shift.id} className="px-4 py-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-foreground">Shift {shift.shift_number}</span>
-                        <span className="text-foreground">₦{shift.sales_amount.toLocaleString()}</span>
+              <div className="rounded-lg border border-border/60 px-4">
+                <Accordion type="single" collapsible defaultValue="recent-shifts">
+                  <AccordionItem value="recent-shifts" className="border-b-0">
+                    <AccordionTrigger className="py-3 text-sm font-semibold text-foreground hover:no-underline">
+                      Recent Shifts
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-0">
+                      <div className="divide-y divide-border/60">
+                        {branchShifts.slice(0, 5).map((shift) => (
+                          <div key={shift.id} className="px-1 py-3 text-sm">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-foreground">Shift {shift.shift_number}</span>
+                              <span className="text-foreground">₦{Number(shift.sales_amount ?? 0).toLocaleString()}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Pump {shift.pump_id ?? shift.pumpId ?? shift.pump?.id ?? 'N/A'}
+                            </p>
+                          </div>
+                        ))}
+                        {branchShifts.length === 0 && (
+                          <div className="px-1 py-4 text-sm text-muted-foreground">No shifts yet.</div>
+                        )}
                       </div>
-                      <p className="text-xs text-muted-foreground">Pump {shift.pump_id}</p>
-                    </div>
-                  ))}
-                  {branchShifts.length === 0 && (
-                    <div className="px-4 py-4 text-sm text-muted-foreground">No shifts yet.</div>
-                  )}
-                </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
               </div>
             </div>
           )}
@@ -389,20 +484,36 @@ export default function FuelBranchesPage() {
           </DialogHeader>
           <form
             className="space-y-4"
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault()
-              if (!selectedBranch) return
-              const updated = {
-                ...selectedBranch,
-                name: editData.name.trim(),
-                location: editData.location.trim(),
-                manager_id: editData.managerName.trim() || 'unassigned',
-                status: editData.status,
+              if (!selectedBranchId) return
+              const managerName = editData.managerName.trim()
+              if (!managerName) {
+                toast({
+                  title: 'Missing manager name',
+                  description: 'Manager name is required.',
+                })
+                return
               }
-              updateBranch(updated)
-              setBranches((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
-              setIsEditOpen(false)
-              toast({ title: 'Station updated', description: `${updated.name} saved.` })
+              try {
+                await apiService.updateBranch(selectedBranchId, {
+                  name: editData.name.trim(),
+                  location: editData.location.trim(),
+                  status: editData.status,
+                  manager_name: managerName,
+                })
+                await loadData()
+                setIsEditOpen(false)
+                toast({
+                  title: 'Station updated',
+                  description: 'Station details were updated successfully.',
+                })
+              } catch (e) {
+                toast({
+                  title: 'Update failed',
+                  description: getErrorMessage(e),
+                })
+              }
             }}
           >
             <div className="space-y-2">

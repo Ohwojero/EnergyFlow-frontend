@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent, useEffect } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/metric-card'
@@ -11,7 +11,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/context/auth-context'
-import { mockBranches } from '@/lib/mock-data'
+import { apiService } from '@/lib/api'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import {
   Dialog,
@@ -21,55 +21,44 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { getAllExpenses, addExpense } from '@/lib/expense-store' 
 
-// mock data for fuel expenses (used as defaults)
-const mockFuelExpenses: Array<{id:string;category:string;amount:number;description:string;created_at:string;branch_id?:string}> = [
-  {
-    id: 'fexp-1',
-    category: 'pump_maintenance',
-    amount: 45000,
-    description: 'Pump 1 and 2 maintenance service',
-    created_at: new Date().toISOString(),
-    branch_id: 'branch-3',
-  },
-  {
-    id: 'fexp-2',
-    category: 'tank_cleaning',
-    amount: 30000,
-    description: 'Main storage tank cleaning and inspection',
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    branch_id: 'branch-4',
-  },
-  {
-    id: 'fexp-3',
-    category: 'filter_replacement',
-    amount: 15000,
-    description: 'Fuel filter replacement',
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-    branch_id: 'branch-3',
-  },
-]
+type ExpenseItem = {
+  id: string
+  category: string
+  amount: number
+  description: string
+  created_at: string
+  branch_id?: string
+  branch_name?: string
+  _type?: 'fuel' | 'gas'
+}
 
 export default function FuelExpensesPage() {
-  const { user, selectedBranchId } = useAuth()
+  const { user, selectedBranchId, selectedBranchType } = useAuth()
   const isOwner = user?.role === 'org_owner'
+  const [allBranches, setAllBranches] = useState<any[]>([])
+  const [fuelBranches, setFuelBranches] = useState<any[]>([])
+  const [gasBranches, setGasBranches] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const userFuelBranches = user?.assigned_branches.filter(
-    (id) => mockBranches.find((b) => b.id === id && b.type === 'fuel')
-  ) || []
+  const userFuelBranches = useMemo(
+    () =>
+      user?.assigned_branches.filter((id) =>
+        fuelBranches.some((branch) => branch.id === id)
+      ) || [],
+    [user?.assigned_branches, fuelBranches]
+  )
 
   const currentBranchInfo = selectedBranchId
-    ? mockBranches.find((b) => b.id === selectedBranchId)
+    ? allBranches.find((b) => b.id === selectedBranchId)
     : null
 
   const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(
     isOwner ? null : selectedBranchId
   )
 
-  // maintain separate lists for each type so owners can see both
-  const [fuelExpenses, setFuelExpenses] = useState(getAllExpenses('fuel', mockFuelExpenses))
-  const [gasExpenses, setGasExpenses] = useState(getAllExpenses('gas', []))
+  const [fuelExpenses, setFuelExpenses] = useState<ExpenseItem[]>([])
+  const [gasExpenses, setGasExpenses] = useState<ExpenseItem[]>([])
 
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -79,36 +68,105 @@ export default function FuelExpensesPage() {
     description: '',
   })
 
-  // compute filtered list based on branch selection
-  // combine expenses when owner; otherwise just use fuel list
+  const mapExpense = (expense: any, type: 'fuel' | 'gas', branches: any[]): ExpenseItem => {
+    const branchId = String(expense.branch?.id ?? expense.branch_id ?? '')
+    const branchName =
+      expense.branch?.name ||
+      branches.find((b) => b.id === branchId)?.name
+    return {
+      id: String(expense.id),
+      category: String(expense.category ?? ''),
+      amount: Number(expense.amount ?? 0),
+      description: String(expense.description ?? ''),
+      created_at: String(expense.created_at ?? new Date().toISOString()),
+      branch_id: branchId || undefined,
+      branch_name: branchName,
+      _type: type,
+    }
+  }
+
+  const loadExpenses = async () => {
+    setIsLoading(true)
+    try {
+      const branchData = await apiService.getBranches().catch(() => [])
+      const branches = Array.isArray(branchData) ? branchData : []
+      const gasList = branches.filter((b: any) => b.type === 'gas')
+      const fuelList = branches.filter((b: any) => b.type === 'fuel')
+
+      const scopedFuelBranches = (() => {
+        if (isOwner) return fuelList
+        const assigned = new Set(user?.assigned_branches ?? [])
+        if (assigned.size > 0) {
+          return fuelList.filter((b: any) => assigned.has(b.id))
+        }
+        if (selectedBranchId) {
+          const selected = fuelList.find((b: any) => b.id === selectedBranchId)
+          return selected ? [selected] : fuelList
+        }
+        if (selectedBranchType === 'fuel') return fuelList
+        return fuelList
+      })()
+
+      const scopedGasBranches = (() => {
+        if (isOwner) return gasList
+        return []
+      })()
+
+      setAllBranches(branches)
+      setGasBranches(scopedGasBranches)
+      setFuelBranches(scopedFuelBranches)
+
+      const [allFuelExpenses, allGasExpenses] = await Promise.all([
+        apiService.getAllFuelExpenses().catch(() => []),
+        apiService.getAllGasExpenses().catch(() => []),
+      ])
+
+      const allowedFuelIds = new Set(scopedFuelBranches.map((b: any) => String(b.id)))
+      const allowedGasIds = new Set(scopedGasBranches.map((b: any) => String(b.id)))
+
+      setFuelExpenses(
+        (Array.isArray(allFuelExpenses) ? allFuelExpenses : [])
+          .filter((expense: any) =>
+            allowedFuelIds.size > 0
+              ? allowedFuelIds.has(String(expense.branch?.id ?? expense.branch_id ?? ''))
+              : true,
+          )
+          .map((expense: any) => mapExpense(expense, 'fuel', branches))
+      )
+      setGasExpenses(
+        (Array.isArray(allGasExpenses) ? allGasExpenses : [])
+          .filter((expense: any) =>
+            allowedGasIds.size > 0
+              ? allowedGasIds.has(String(expense.branch?.id ?? expense.branch_id ?? ''))
+              : false,
+          )
+          .map((expense: any) => mapExpense(expense, 'gas', branches))
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadExpenses()
+  }, [user?.id, selectedBranchId, selectedBranchType, isOwner])
+
   const expenses = isOwner
-    ? [
-        ...fuelExpenses.map((e) => ({ ...e, _type: 'fuel' })),
-        ...gasExpenses.map((e) => ({ ...e, _type: 'gas' })),
-      ]
+    ? [...fuelExpenses, ...gasExpenses]
     : fuelExpenses
 
   const visibleExpenses = (() => {
     const source = expenses
     if (isOwner) {
       if (!localSelectedBranchId) {
-        return source.map((e) => ({
-          ...e,
-          branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
-        }))
+        return source
       }
-      return source
-        .filter((e) => e.branch_id === localSelectedBranchId)
-        .map((e) => ({
-          ...e,
-          branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
-        }))
+      return source.filter((e) => e.branch_id === localSelectedBranchId)
     } else {
-      const filtered = source.filter((e) => e.branch_id === selectedBranchId)
-      return filtered.map((e) => ({
-        ...e,
-        branch_name: e.branch_name ?? mockBranches.find((b) => b.id === e.branch_id)?.name,
-      }))
+      const targetBranchId = selectedBranchId || user?.assigned_branches?.[0] || null
+      if (!targetBranchId) return source
+      const filtered = source.filter((e) => e.branch_id === targetBranchId)
+      return filtered
     }
   })()
 
@@ -154,20 +212,6 @@ export default function FuelExpensesPage() {
   const monthGroups = groupByMonth(visibleExpenses)
   const currentMonth = new Date().toISOString().slice(0, 7)
 
-  // Listen for changes to localStorage (when managers record expenses)
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key?.includes('energyflow_expenses_fuel')) {
-        setFuelExpenses(getAllExpenses('fuel', mockFuelExpenses))
-      }
-      if (e.key?.includes('energyflow_expenses_gas')) {
-        setGasExpenses(getAllExpenses('gas', []))
-      }
-    }
-    window.addEventListener('storage', handleStorageChange)
-    return () => window.removeEventListener('storage', handleStorageChange)
-  }, [])
-
   const resetForm = () => {
     setFormData({
       category: 'pump_maintenance',
@@ -176,7 +220,7 @@ export default function FuelExpensesPage() {
     })
   }
 
-  const handleRecordExpense = (e: FormEvent) => {
+  const handleRecordExpense = async (e: FormEvent) => {
     e.preventDefault()
     const amount = Number(formData.amount)
     const description = formData.description.trim()
@@ -201,31 +245,41 @@ export default function FuelExpensesPage() {
     const chosenBranch = isOwner
       ? localSelectedBranchId ??
         user?.assigned_branches?.[0] ??
-        mockFuelExpenses[0]?.branch_id ??
-        'branch-3'
+        fuelBranches[0]?.id ??
+        ''
       : selectedBranchId ??
         user?.assigned_branches?.[0] ??
-        mockFuelExpenses[0]?.branch_id ??
-        'branch-3'
-      const nextExpense = {
-      id: `fexp-${Date.now()}`,
-      category: formData.category,
-      amount,
-      description,
-      branch_id: chosenBranch,
-      branch_name: mockBranches.find((b) => b.id === chosenBranch)?.name,
-      created_at: new Date().toISOString(),
+        fuelBranches[0]?.id ??
+        ''
+
+    if (!chosenBranch) {
+      toast({
+        title: 'No branch selected',
+        description: 'Please choose a fuel branch before submitting.',
+      })
+      setIsSubmitting(false)
+      return
     }
 
     try {
-      addExpense('fuel', nextExpense)
-      setFuelExpenses((prev) => [nextExpense, ...prev])
+      await apiService.createFuelExpense({
+        branch_id: chosenBranch,
+        category: formData.category,
+        amount,
+        description,
+      })
+      await loadExpenses()
       toast({
         title: 'Expense recorded',
         description: 'Fuel expense has been added successfully.',
       })
       setIsExpenseModalOpen(false)
       resetForm()
+    } catch (error) {
+      toast({
+        title: 'Failed to save expense',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -269,8 +323,7 @@ export default function FuelExpensesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Branches</SelectItem>
-                  {mockBranches
-                    .filter((b) => b.type === 'fuel')
+                  {fuelBranches
                     .map((branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
                         {branch.name} ({branch.location})
@@ -313,7 +366,11 @@ export default function FuelExpensesPage() {
           <h3 className="text-lg font-semibold text-foreground">Expense Records</h3>
         </div>
 
-        {expenses.length === 0 ? (
+        {isLoading ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">Loading expenses...</p>
+          </div>
+        ) : expenses.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>

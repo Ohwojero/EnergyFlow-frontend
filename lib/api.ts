@@ -1,28 +1,75 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 class ApiService {
+  private refreshPromise: Promise<any> | null = null;
+
   private getAuthHeaders() {
-    const token = localStorage.getItem('token');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     return {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
     };
   }
 
-  private async request(endpoint: string, options: RequestInit = {}) {
+  private async refreshAccessToken() {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.request('/auth/refresh', { method: 'POST' }, false)
+        .finally(() => {
+          this.refreshPromise = null;
+        });
+    }
+    return this.refreshPromise;
+  }
+
+  private async request(endpoint: string, options: RequestInit = {}, retryOnUnauthorized = true) {
     const url = `${API_BASE_URL}${endpoint}`;
+    const mergedHeaders = {
+      ...this.getAuthHeaders(),
+      ...(options.headers ?? {}),
+    };
     const config = {
-      headers: this.getAuthHeaders(),
+      headers: mergedHeaders,
+      credentials: 'include',
       ...options,
     };
 
-    const response = await fetch(url, config);
-    
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
+    let response: Response;
+    try {
+      response = await fetch(url, config);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Network request failed';
+      throw new Error(`Unable to connect to API at ${API_BASE_URL}. ${message}`);
     }
 
-    return response.json();
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    const isAuthEndpoint = endpoint.startsWith('/auth/login') || endpoint.startsWith('/auth/register') || endpoint.startsWith('/auth/refresh');
+    if (response.status === 401 && retryOnUnauthorized && !isAuthEndpoint) {
+      try {
+        const refreshResult = await this.refreshAccessToken();
+        const newToken = refreshResult?.access_token;
+        if (newToken && typeof window !== 'undefined') {
+          localStorage.setItem('token', newToken);
+        }
+        return this.request(endpoint, options, false);
+      } catch {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('token');
+        }
+      }
+    }
+
+    if (!response.ok) {
+      const message = payload?.message || payload?.error || `API Error: ${response.status}`;
+      throw new Error(message);
+    }
+
+    return payload;
   }
 
   // Auth APIs
@@ -44,9 +91,40 @@ class ApiService {
     return this.request('/auth/profile');
   }
 
+  async refresh() {
+    const result = await this.request('/auth/refresh', { method: 'POST' }, false)
+    const token = result?.access_token
+    if (token && typeof window !== 'undefined') {
+      localStorage.setItem('token', token)
+    }
+    return result
+  }
+
+  async logout() {
+    return this.request('/auth/logout', { method: 'POST' })
+  }
+
   // Tenant APIs
   async getTenants() {
     return this.request('/tenant');
+  }
+
+  async getTenantById(id: string) {
+    return this.request(`/tenant/${id}`)
+  }
+
+  async updateTenant(id: string, data: any) {
+    return this.request(`/tenant/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async changeTenantPlan(id: string, plan: 'personal' | 'organisation') {
+    return this.request(`/tenant/${id}/plan`, {
+      method: 'PUT',
+      body: JSON.stringify({ plan }),
+    })
   }
 
   async suspendTenant(id: string) {
@@ -68,6 +146,32 @@ class ApiService {
 
   async getBranchesByType(type: string) {
     return this.request(`/branch/by-type?type=${type}`);
+  }
+
+  async createBranch(data: any) {
+    return this.request('/branch', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateBranch(id: string, data: any) {
+    return this.request(`/branch/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveBranch(id: string) {
+    return this.request(`/branch/${id}/archive`, {
+      method: 'PATCH',
+    });
+  }
+
+  async deleteBranch(id: string) {
+    return this.request(`/branch/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // Gas APIs
@@ -95,6 +199,34 @@ class ApiService {
 
   async getGasSales(branchId: string) {
     return this.request(`/gas/sales/${branchId}`);
+  }
+
+  async updateGasSale(id: string, data: any) {
+    return this.request(`/gas/sales/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteGasSale(id: string) {
+    return this.request(`/gas/sales/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createGasExpense(data: any) {
+    return this.request('/gas/expenses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async getGasExpenses(branchId: string) {
+    return this.request(`/gas/expenses/${branchId}`)
+  }
+
+  async getAllGasExpenses() {
+    return this.request('/gas/expenses')
   }
 
   async createGasCylinder(data: any) {
@@ -161,6 +293,10 @@ class ApiService {
     return this.request(`/fuel/expenses/${branchId}`);
   }
 
+  async getAllFuelExpenses() {
+    return this.request('/fuel/expenses');
+  }
+
   async getFuelAnalytics(branchId: string) {
     return this.request(`/fuel/analytics/${branchId}`);
   }
@@ -168,6 +304,40 @@ class ApiService {
   // User APIs
   async getUsers() {
     return this.request('/user');
+  }
+
+  async createUser(data: any) {
+    return this.request('/user', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateUser(id: string, data: any) {
+    return this.request(`/user/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteUser(id: string) {
+    return this.request(`/user/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getAdminDashboard() {
+    return this.request('/admin/dashboard')
+  }
+
+  async getAdminActivityLogs(tenantId?: string) {
+    const query = tenantId ? `?tenant=${tenantId}` : ''
+    return this.request(`/admin/activity-logs${query}`)
+  }
+
+  async getAdminBilling(tenantId?: string) {
+    const query = tenantId ? `?tenant=${tenantId}` : ''
+    return this.request(`/admin/billing${query}`)
   }
 }
 

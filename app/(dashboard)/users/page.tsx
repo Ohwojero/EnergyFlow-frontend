@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,20 +14,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { mockBranches, mockUsers } from '@/lib/mock-data'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { Users, Trash2, Edit2 } from 'lucide-react'
-import type { BranchType, User, UserRole } from '@/types'
+import { apiService } from '@/lib/api'
+import type { Branch, BranchType, User, UserRole } from '@/types'
 
 export default function UsersPage() {
   const { user: currentUser, selectedBranchType, selectedBranchId } = useAuth()
+  const isPersonalOwner =
+    currentUser?.role === 'org_owner' && currentUser?.subscription_plan === 'personal'
   const isPersonalContext =
+    isPersonalOwner ||
     currentUser?.role === 'gas_manager' || currentUser?.role === 'fuel_manager'
-  const personalManagerRole: UserRole =
-    selectedBranchType === 'fuel' ? 'fuel_manager' : 'gas_manager'
-  const getDefaultRole = (): UserRole => (isPersonalContext ? 'sales_staff' : 'sales_staff')
-  const [allUsers, setAllUsers] = useState<User[]>(Object.values(mockUsers))
+  const getDefaultRole = (): UserRole => 'sales_staff'
+
+  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [tenantBranches, setTenantBranches] = useState<Branch[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false)
   const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -39,16 +43,59 @@ export default function UsersPage() {
     branchId: '',
   })
 
+  useEffect(() => {
+    const normalizeUser = (raw: any): User => ({
+      id: raw.id,
+      email: raw.email,
+      name: raw.name,
+      role: raw.role,
+      tenant_id: raw.tenant_id ?? raw.tenant?.id ?? '',
+      assigned_branches: Array.isArray(raw.assigned_branches)
+        ? raw.assigned_branches
+            .map((branch: any) => (typeof branch === 'string' ? branch : branch?.id))
+            .filter(Boolean)
+        : [],
+      assigned_branch_types: raw.assigned_branch_types ?? [],
+      created_at: raw.created_at ?? new Date().toISOString(),
+    })
+
+    const loadData = async () => {
+      setIsLoading(true)
+      try {
+        const [usersData, branchesData] = await Promise.all([
+          apiService.getUsers(),
+          apiService.getBranches(),
+        ])
+        setAllUsers((Array.isArray(usersData) ? usersData : []).map(normalizeUser))
+        let branchList = Array.isArray(branchesData) ? branchesData : []
+        if (isPersonalOwner && branchList.length === 0) {
+          const gasBranches = await apiService.getGasBranches().catch(() => [])
+          branchList = Array.isArray(gasBranches) ? gasBranches : []
+        }
+        setTenantBranches(branchList)
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Unable to load users and branches.',
+        })
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadData()
+  }, [])
+
   const users = useMemo(() => {
     if (!currentUser) return []
     if (currentUser.role === 'super_admin') return allUsers
+    if (currentUser.role === 'gas_manager' || currentUser.role === 'fuel_manager') {
+      // Backend already scopes manager-visible users to sales staff in manager branches.
+      // Avoid double-filtering here to prevent hiding newly created users.
+      return allUsers
+    }
     return allUsers.filter((u) => u.tenant_id === currentUser.tenant_id)
   }, [allUsers, currentUser])
-
-  const tenantBranches = useMemo(() => {
-    if (!currentUser) return []
-    return mockBranches.filter((b) => b.tenant_id === currentUser.tenant_id)
-  }, [currentUser])
 
   const getRoleBgColor = (role: string) => {
     switch (role) {
@@ -95,15 +142,23 @@ export default function UsersPage() {
     setIsUserDialogOpen(true)
   }
 
-  const handleDeleteUser = (user: User) => {
-    const confirmed = window.confirm(`Delete ${user.name}? This action cannot be undone.`)
-    if (!confirmed) return
-
-    setAllUsers((prev) => prev.filter((u) => u.id !== user.id))
-    toast({
-      title: 'User deleted',
-      description: `${user.name} was removed successfully.`,
-    })
+  const handleDeleteUser = async (user: User) => {
+    if (!window.confirm(`Delete ${user.name}? This action cannot be undone.`)) {
+      return
+    }
+    try {
+      await apiService.deleteUser(user.id)
+      setAllUsers((prev) => prev.filter((u) => u.id !== user.id))
+      toast({
+        title: 'User deleted',
+        description: `${user.name} was removed successfully.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Could not delete user.',
+      })
+    }
   }
 
   const handleSaveUser = async (e: FormEvent) => {
@@ -113,9 +168,7 @@ export default function UsersPage() {
     const name = formData.name.trim()
     const email = formData.email.trim()
     const password = formData.password
-    const normalizedRole = isPersonalContext
-      ? (formData.role === 'sales_staff' ? 'sales_staff' : personalManagerRole)
-      : formData.role
+    const normalizedRole = isPersonalContext ? 'sales_staff' : formData.role
     if (!name || !email || (!editingUserId && !password)) {
       toast({
         title: 'Missing details',
@@ -137,42 +190,100 @@ export default function UsersPage() {
     setIsSubmitting(true)
     try {
       const selectedBranch = isPersonalContext
-        ? tenantBranches.find((b) => b.id === selectedBranchId) ?? tenantBranches[0]
+        ? tenantBranches.find((b) => b.id === selectedBranchId) ??
+          tenantBranches.find((b) => currentUser.assigned_branches.includes(b.id)) ??
+          tenantBranches[0]
         : tenantBranches.find((b) => b.id === formData.branchId)
-      const assignedBranchTypes: BranchType[] = selectedBranch
-        ? [selectedBranch.type]
-        : normalizedRole === 'gas_manager'
-          ? ['gas']
-          : normalizedRole === 'fuel_manager'
-            ? ['fuel']
-            : []
-
-      const newUser = {
-        id: editingUserId ?? `user-${Date.now()}`,
-        name,
-        email,
-        role: normalizedRole,
-        tenant_id: currentUser.tenant_id,
-        assigned_branches: selectedBranch ? [selectedBranch.id] : [],
-        assigned_branch_types: assignedBranchTypes,
-        created_at:
-          allUsers.find((u) => u.id === editingUserId)?.created_at ?? new Date().toISOString(),
-      }
-
       if (editingUserId) {
-        setAllUsers((prev) => prev.map((u) => (u.id === editingUserId ? newUser : u)))
+        const updatePayload = isPersonalContext
+          ? {
+              name,
+              email,
+              ...(password ? { password } : {}),
+              role: 'sales_staff' as const,
+            }
+          : {
+              name,
+              email,
+              ...(password ? { password } : {}),
+              role: normalizedRole,
+              branch_ids: selectedBranch ? [selectedBranch.id] : [],
+            }
+        const updated = await apiService.updateUser(editingUserId, updatePayload)
+        const normalizedUpdated: User = {
+          id: updated.id,
+          email: updated.email,
+          name: updated.name,
+          role: updated.role,
+          tenant_id: updated.tenant_id ?? updated.tenant?.id ?? currentUser.tenant_id,
+          assigned_branches: Array.isArray(updated.assigned_branches)
+            ? updated.assigned_branches
+                .map((branch: any) => (typeof branch === 'string' ? branch : branch?.id))
+                .filter(Boolean)
+            : [],
+          assigned_branch_types: updated.assigned_branch_types ?? [],
+          created_at: updated.created_at ?? new Date().toISOString(),
+        }
+        setAllUsers((prev) => prev.map((u) => (u.id === editingUserId ? normalizedUpdated : u)))
+        toast({
+          title: 'User updated',
+          description: `${name} was updated successfully.`,
+        })
       } else {
-        setAllUsers((prev) => [newUser, ...prev])
+        const assignedBranchTypes: BranchType[] = isPersonalContext
+          ? []
+          : selectedBranch
+          ? [selectedBranch.type]
+          : normalizedRole === 'gas_manager'
+            ? ['gas']
+            : normalizedRole === 'fuel_manager'
+              ? ['fuel']
+              : []
+        const payload = isPersonalContext
+          ? {
+              name,
+              email,
+              password,
+              role: 'sales_staff' as const,
+            }
+          : {
+              name,
+              email,
+              password,
+              role: normalizedRole,
+              branch_ids: selectedBranch ? [selectedBranch.id] : [],
+              assigned_branch_types: assignedBranchTypes,
+            }
+        const created = await apiService.createUser(payload)
+
+        const normalizedCreated: User = {
+          id: created.id,
+          email: created.email,
+          name: created.name,
+          role: created.role,
+          tenant_id: created.tenant_id ?? created.tenant?.id ?? currentUser.tenant_id,
+          assigned_branches: Array.isArray(created.assigned_branches)
+            ? created.assigned_branches
+                .map((branch: any) => (typeof branch === 'string' ? branch : branch?.id))
+                .filter(Boolean)
+            : [],
+          assigned_branch_types: created.assigned_branch_types ?? [],
+          created_at: created.created_at ?? new Date().toISOString(),
+        }
+        setAllUsers((prev) => [normalizedCreated, ...prev])
+        toast({
+          title: 'User added',
+          description: `${name} was added successfully.`,
+        })
       }
-      toast({
-        title: editingUserId ? 'User updated' : 'User added',
-        description: editingUserId
-          ? `${name} was updated successfully.`
-          : `${name} was added successfully.`,
-      })
       setIsUserDialogOpen(false)
       setEditingUserId(null)
       resetForm()
+    } catch (error) {
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Could not create user.',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -180,7 +291,6 @@ export default function UsersPage() {
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      {/* Page Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
@@ -199,66 +309,73 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {/* Users Table */}
       <Card className="shadow-card">
         <div className="p-6 border-b border-border">
           <h3 className="text-lg font-semibold text-foreground">All Users</h3>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Name</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Email</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Role</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
-                <th className="px-6 py-3 text-right font-semibold text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <p className="font-medium text-foreground">{user.name}</p>
-                  </td>
-                  <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
-                  <td className="px-6 py-4">
-                    <Badge className={getRoleBgColor(user.role)}>
-                      {user.role.replace(/_/g, ' ').toUpperCase()}
-                    </Badge>
-                  </td>
-                  <td className="px-6 py-4 text-foreground">
-                    {user.assigned_branches.length} branch{user.assigned_branches.length !== 1 ? 'es' : ''}
-                  </td>
-                  <td className="px-6 py-4">
-                    <Badge className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                      Active
-                    </Badge>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
-                        onClick={() => handleEditUser(user)}
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
-                        onClick={() => handleDeleteUser(user)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+          {isLoading ? (
+            <div className="px-6 py-8 text-center text-muted-foreground">Loading users...</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Name</th>
+                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Email</th>
+                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Role</th>
+                  {!isPersonalOwner && (
+                    <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
+                  )}
+                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
+                  <th className="px-6 py-3 text-right font-semibold text-muted-foreground">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="font-medium text-foreground">{user.name}</p>
+                    </td>
+                    <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
+                    <td className="px-6 py-4">
+                      <Badge className={getRoleBgColor(user.role)}>
+                        {user.role.replace(/_/g, ' ').toUpperCase()}
+                      </Badge>
+                    </td>
+                    {!isPersonalOwner && (
+                      <td className="px-6 py-4 text-foreground">
+                        {user.assigned_branches.length} branch{user.assigned_branches.length !== 1 ? 'es' : ''}
+                      </td>
+                    )}
+                    <td className="px-6 py-4">
+                      <Badge className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                        Active
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => handleEditUser(user)}
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
+                          onClick={() => handleDeleteUser(user)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </Card>
 
@@ -277,9 +394,9 @@ export default function UsersPage() {
             <DialogTitle>{editingUserId ? 'Edit User' : 'Add New User'}</DialogTitle>
             <DialogDescription>
               {editingUserId
-                ? 'Update user details and branch assignment.'
+                ? 'Update user details.'
                 : isPersonalContext
-                  ? 'Create personal users with manager or sales staff role.'
+                  ? 'Create sales staff users.'
                   : 'Create a user for your organisation and assign an optional branch.'}
             </DialogDescription>
           </DialogHeader>
@@ -325,9 +442,13 @@ export default function UsersPage() {
                 onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value as UserRole }))}
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="gas_manager">Gas Manager</option>
-                <option value="fuel_manager">Fuel Manager</option>
                 <option value="sales_staff">Sales Staff</option>
+                {!isPersonalContext && (
+                  <>
+                    <option value="gas_manager">Gas Manager</option>
+                    <option value="fuel_manager">Fuel Manager</option>
+                  </>
+                )}
               </select>
             </div>
 

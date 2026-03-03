@@ -1,15 +1,12 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { mockGasTransactions, mockBranches } from '@/lib/mock-data'
 import { ShoppingCart, TrendingUp, ArrowUpRight, Edit, Trash2 } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
-import type { GasTransaction } from '@/types'
-import { addGasSale, getAllGasSales } from '@/lib/gas-sales-store'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -21,29 +18,56 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { apiService } from '@/lib/api'
+import type { Branch, GasTransaction } from '@/types'
 
-type SaleTransaction = GasTransaction & { branch_name?: string }
+type SaleTransaction = GasTransaction & { branch_name?: string; payment_method?: string; salesperson?: string }
+
+const parseSaleNotes = (rawNotes: string) => {
+  const notesValue = String(rawNotes ?? '')
+  const parts = notesValue.split('|').map((p) => p.trim()).filter(Boolean)
+  let paymentMethod = ''
+  let salesperson = ''
+  const cleanedNotes: string[] = []
+
+  parts.forEach((part) => {
+    if (part.startsWith('payment:')) {
+      paymentMethod = part.replace('payment:', '').trim()
+      return
+    }
+    if (part.startsWith('salesperson:')) {
+      salesperson = part.replace('salesperson:', '').trim()
+      return
+    }
+    cleanedNotes.push(part)
+  })
+
+  return {
+    notes: cleanedNotes.join(' | '),
+    payment_method: paymentMethod,
+    salesperson,
+  }
+}
 
 export default function GasSalesPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
+  const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
   const isManager = user?.role === 'gas_manager'
+  const isSalesStaff = user?.role === 'sales_staff'
   const canEditDelete = isOwner || isManager
 
-  // compute gas‑type branches assigned to user
-  const userGasBranches = user?.assigned_branches.filter(
-    (id) => mockBranches.find((b) => b.id === id && b.type === 'gas')
-  ) || []
-
-  const currentBranchInfo = selectedBranchId
-    ? mockBranches.find((b) => b.id === selectedBranchId)
-    : null
-
-  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(selectedBranchId)
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(() =>
+    user?.role === 'org_owner' ? null : selectedBranchId,
+  )
+  const [isLoading, setIsLoading] = useState(true)
 
   const [isRecordSaleOpen, setIsRecordSaleOpen] = useState(false)
+  const [isEditSaleOpen, setIsEditSaleOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [salesTransactions, setSalesTransactions] = useState<SaleTransaction[]>([])
+  const [editingSale, setEditingSale] = useState<SaleTransaction | null>(null)
   const [formData, setFormData] = useState({
     quantity: '',
     amount: '',
@@ -51,35 +75,119 @@ export default function GasSalesPage() {
     paymentMethod: '',
     salesperson: '',
   })
+  const [editFormData, setEditFormData] = useState({
+    quantity: '',
+    amount: '',
+    notes: '',
+    paymentMethod: '',
+    salesperson: '',
+  })
+
+  const userGasBranches = useMemo(
+    () => branches.filter((branch) => user?.assigned_branches?.includes(branch.id)),
+    [branches, user?.assigned_branches],
+  )
+
+  const currentBranchInfo = useMemo(() => {
+    const branchId = isOwner ? localSelectedBranchId : selectedBranchId
+    return branchId ? branches.find((branch) => branch.id === branchId) : null
+  }, [branches, isOwner, localSelectedBranchId, selectedBranchId])
+
+  const normalizeTransaction = (raw: any, fallbackBranchId?: string): SaleTransaction => {
+    const parsed = parseSaleNotes(raw.notes ?? '')
+    return {
+      id: raw.id,
+      branch_id: raw.branch_id ?? raw.branch?.id ?? fallbackBranchId ?? '',
+      type: raw.type,
+      cylinder_size: raw.cylinder_size ?? '',
+      quantity: Number(raw.quantity ?? 0),
+      amount: Number(raw.amount ?? 0),
+      notes: parsed.notes,
+      created_at: raw.created_at ?? new Date().toISOString(),
+      branch_name: raw.branch_name ?? raw.branch?.name,
+      payment_method: raw.payment_method ?? parsed.payment_method,
+      salesperson: raw.salesperson ?? parsed.salesperson,
+    }
+  }
 
   useEffect(() => {
-    const baseSales = getAllGasSales()
-    const effectiveBranchId = isOwner ? localSelectedBranchId : selectedBranchId
-    const scopedSales =
-      isOwner && !localSelectedBranchId
-        ? baseSales
-        : baseSales.filter((transaction) => transaction.branch_id === effectiveBranchId)
+    const loadBranches = async () => {
+      try {
+        const data = await apiService.getGasBranches()
+        setBranches(Array.isArray(data) ? data : [])
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Could not load gas branches.',
+        })
+      }
+    }
+    loadBranches()
+  }, [])
 
-    setSalesTransactions(
-      scopedSales.map((t) => {
-        const branch = mockBranches.find((b) => b.id === t.branch_id)
-        return { ...t, branch_name: branch?.name }
-      })
-    )
-  }, [isOwner, selectedBranchId, localSelectedBranchId])
+  useEffect(() => {
+    const loadSales = async () => {
+      setIsLoading(true)
+      try {
+        if (isOwner) {
+          const targetBranchIds = localSelectedBranchId
+            ? [localSelectedBranchId]
+            : branches.map((branch) => branch.id)
+          const responses = await Promise.all(
+            targetBranchIds.map(async (branchId) => {
+              const list = await apiService.getGasSales(branchId)
+              return (Array.isArray(list) ? list : []).map((row) => normalizeTransaction(row, branchId))
+            }),
+          )
+          const all = responses.flat().sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+          )
+          setSalesTransactions(all)
+          return
+        }
+
+        const fallbackBranchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
+        if (!fallbackBranchId) {
+          setSalesTransactions([])
+          return
+        }
+        const list = await apiService.getGasSales(fallbackBranchId)
+        const normalized = (Array.isArray(list) ? list : []).map((row) =>
+          normalizeTransaction(row, fallbackBranchId),
+        )
+        setSalesTransactions(normalized)
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Could not load gas sales.',
+        })
+        setSalesTransactions([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    if (branches.length > 0 || selectedBranchId || isOwner) {
+      loadSales()
+    }
+  }, [branches, isOwner, localSelectedBranchId, selectedBranchId, user?.assigned_branches])
 
   const totalSales = salesTransactions.reduce((sum, t) => sum + t.amount, 0)
   const avgSaleValue = salesTransactions.length > 0 ? totalSales / salesTransactions.length : 0
+  const formatMoneyShort = (amount: number) => {
+    if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
+    if (amount >= 1000) return `N${(amount / 1000).toFixed(1)}K`
+    return `N${amount.toLocaleString()}`
+  }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-NG', {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('en-NG', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
     })
-  }
 
   const groupByMonth = (transactions: SaleTransaction[]) => {
     const groups: Record<string, SaleTransaction[]> = {}
@@ -105,13 +213,95 @@ export default function GasSalesPage() {
     })
   }
 
-  const handleSaveSale = (e: FormEvent) => {
+  const handleSaveSale = async (e: FormEvent) => {
     e.preventDefault()
     const quantity = Number(formData.quantity)
     const amount = Number(formData.amount)
     const notes = formData.notes.trim()
 
-    if (!quantity || !amount || !formData.paymentMethod || !formData.salesperson) {
+    const salespersonValue = isSalesStaff ? 'sales_staff' : formData.salesperson
+
+    if (!quantity || !amount || !formData.paymentMethod || !salespersonValue) {
+      toast({
+        title: 'Missing details',
+        description: 'All fields are required.',
+      })
+      return
+    }
+
+    if (quantity <= 0 || amount <= 0) {
+      toast({
+        title: 'Invalid values',
+        description: 'Quantity and amount must be greater than zero.',
+      })
+      return
+    }
+
+    const branchId = isOwner
+      ? localSelectedBranchId
+      : selectedBranchId ?? user?.assigned_branches?.[0] ?? currentBranchInfo?.id ?? branches[0]?.id
+    if (!branchId) {
+      toast({
+        title: 'Missing branch',
+        description: isOwner
+          ? 'Select a branch (not "All Branches") before recording sales.'
+          : 'Select a branch before recording sales.',
+      })
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const created = await apiService.createGasSale({
+        branch_id: branchId,
+        type: 'sale',
+        cylinder_size: `${quantity}kg`,
+        quantity,
+        amount,
+        notes: `${notes || 'Direct sales entry'} | payment:${formData.paymentMethod} | salesperson:${salespersonValue}`,
+      })
+      const nextSale = normalizeTransaction(created, branchId)
+      nextSale.branch_name = branches.find((branch) => branch.id === branchId)?.name
+      nextSale.payment_method = formData.paymentMethod
+      nextSale.salesperson = salespersonValue
+      setSalesTransactions((prev) => [nextSale, ...prev])
+      toast({
+        title: 'Sale recorded',
+        description: 'Gas sale transaction added successfully.',
+      })
+      setIsRecordSaleOpen(false)
+      resetForm()
+    } catch (error) {
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Could not save gas sale.',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const openEditModal = (sale: SaleTransaction) => {
+    setEditingSale(sale)
+    setEditFormData({
+      quantity: String(sale.quantity),
+      amount: String(sale.amount),
+      notes: sale.notes ?? '',
+      paymentMethod: sale.payment_method ?? '',
+      salesperson: sale.salesperson ?? '',
+    })
+    setIsEditSaleOpen(true)
+  }
+
+  const handleUpdateSale = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!editingSale) return
+
+    const quantity = Number(editFormData.quantity)
+    const amount = Number(editFormData.amount)
+    const notes = editFormData.notes.trim()
+
+    if (!quantity || !amount || !editFormData.paymentMethod || !editFormData.salesperson) {
       toast({
         title: 'Missing details',
         description: 'All fields are required.',
@@ -129,31 +319,45 @@ export default function GasSalesPage() {
 
     setIsSubmitting(true)
     try {
-      const newTransaction: SaleTransaction = {
-        id: `trans-${Date.now()}`,
-        branch_id:
-          selectedBranchId ??
-          user?.assigned_branches?.[0] ??
-          mockGasTransactions[0]?.branch_id ??
-          'branch-1',
-        type: 'sale',
-        cylinder_size: '',
+      const updated = await apiService.updateGasSale(editingSale.id, {
         quantity,
         amount,
-        notes: notes || 'Direct sales entry',
-        payment_method: formData.paymentMethod,
-        salesperson: formData.salesperson,
-        created_at: new Date().toISOString(),
-      }
-
-      addGasSale(newTransaction)
-      setSalesTransactions((prev) => [newTransaction, ...prev])
-      toast({
-        title: 'Sale recorded',
-        description: 'Gas sale transaction added successfully.',
+        notes: `${notes || 'Direct sales entry'} | payment:${editFormData.paymentMethod} | salesperson:${editFormData.salesperson}`,
       })
-      setIsRecordSaleOpen(false)
-      resetForm()
+      const normalized = normalizeTransaction(updated, editingSale.branch_id)
+      setSalesTransactions((prev) =>
+        prev.map((item) => (item.id === editingSale.id ? { ...item, ...normalized } : item)),
+      )
+      toast({
+        title: 'Sale updated',
+        description: 'Sale transaction was updated successfully.',
+      })
+      setIsEditSaleOpen(false)
+      setEditingSale(null)
+    } catch (error) {
+      toast({
+        title: 'Update failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteSale = async (saleId: string) => {
+    setIsSubmitting(true)
+    try {
+      await apiService.deleteGasSale(saleId)
+      setSalesTransactions((prev) => prev.filter((sale) => sale.id !== saleId))
+      toast({
+        title: 'Sale deleted',
+        description: 'Sale transaction was deleted successfully.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -174,15 +378,12 @@ export default function GasSalesPage() {
             </p>
           )}
         </div>
-        {!isOwner && (
-          <Button onClick={() => setIsRecordSaleOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
-            Record Sale
-          </Button>
-        )}
+        <Button onClick={() => setIsRecordSaleOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          Record Sale
+        </Button>
       </div>
 
-      {/* Branch selector for owners or multi‑branch managers */}
-      {(isOwner || userGasBranches.length > 1) && (
+      {!isPersonalOwner && (isOwner || userGasBranches.length > 1) && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
           <div className="flex items-center gap-4">
             <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
@@ -193,21 +394,17 @@ export default function GasSalesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Branches</SelectItem>
-                  {mockBranches
-                    .filter((b) => b.type === 'gas')
-                    .map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.location})
-                      </SelectItem>
-                    ))}
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name} ({branch.location})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             ) : (
-              <div>
-                <p className="text-sm text-muted-foreground">
-                  {currentBranchInfo?.name} • {currentBranchInfo?.location}
-                </p>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                {currentBranchInfo?.name} • {currentBranchInfo?.location}
+              </p>
             )}
           </div>
         </Card>
@@ -225,7 +422,7 @@ export default function GasSalesPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000000).toFixed(2)}M</h3>
+          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">This period</p>
         </Card>
 
@@ -236,7 +433,7 @@ export default function GasSalesPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Average Sale</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(avgSaleValue / 1000).toFixed(0)}K</h3>
+          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(avgSaleValue)}</h3>
           <p className="text-xs text-muted-foreground mt-2">Per transaction</p>
         </Card>
 
@@ -257,7 +454,9 @@ export default function GasSalesPage() {
           <h3 className="text-lg font-semibold text-foreground">Recent Sales</h3>
         </div>
 
-        {salesTransactions.length === 0 ? (
+        {isLoading ? (
+          <div className="px-6 py-8 text-center text-muted-foreground">Loading sales...</div>
+        ) : salesTransactions.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No sales transactions recorded yet</p>
           </div>
@@ -267,14 +466,14 @@ export default function GasSalesPage() {
               const date = new Date(monthKey + '-01')
               const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
               const monthTotal = transactions.reduce((sum, t) => sum + t.amount, 0)
-              
+
               return (
                 <AccordionItem key={monthKey} value={monthKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
                       <span className="font-semibold">{monthName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {transactions.length} sales • ₦{monthTotal.toLocaleString()}
+                        {transactions.length} sales • N{monthTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -294,32 +493,43 @@ export default function GasSalesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {transactions.map((transaction) => {
-                            const branch = mockBranches.find(b => b.id === transaction.branch_id)
-                            return (
-                              <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                                <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
-                                <td className="px-6 py-4 text-foreground">{branch?.name || 'Unknown Branch'}</td>
-                                <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
-                                <td className="px-6 py-4 font-semibold text-foreground">₦{transaction.amount.toLocaleString()}</td>
-                                <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>
-                                <td className="px-6 py-4 text-foreground">{transaction.salesperson || 'N/A'}</td>
-                                <td className="px-6 py-4 text-muted-foreground text-xs">{transaction.notes}</td>
-                                {canEditDelete && (
-                                  <td className="px-6 py-4">
-                                    <div className="flex gap-2">
-                                      <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                                        <Edit className="w-4 h-4" />
-                                      </Button>
-                                      <Button size="sm" variant="outline" className="h-8 w-8 p-0 text-red-600 hover:bg-red-50">
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
-                                    </div>
-                                  </td>
-                                )}
-                              </tr>
-                            )
-                          })}
+                          {transactions.map((transaction) => (
+                            <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                              <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">
+                                {transaction.branch_name ?? branches.find((b) => b.id === transaction.branch_id)?.name ?? 'Unknown Branch'}
+                              </td>
+                              <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">N{transaction.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>
+                              <td className="px-6 py-4 text-foreground">{transaction.salesperson || 'N/A'}</td>
+                              <td className="px-6 py-4 text-muted-foreground text-xs">{transaction.notes}</td>
+                              {canEditDelete && (
+                                <td className="px-6 py-4">
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => openEditModal(transaction)}
+                                      disabled={isSubmitting}
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-red-600 hover:bg-red-50"
+                                      onClick={() => handleDeleteSale(transaction.id)}
+                                      disabled={isSubmitting}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -383,18 +593,20 @@ export default function GasSalesPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="salesperson">Salesperson</Label>
-              <Select value={formData.salesperson} onValueChange={(value) => setFormData((prev) => ({ ...prev, salesperson: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select salesperson" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="sales_staff">Sales Staff</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {!isSalesStaff && (
+              <div className="space-y-2">
+                <Label htmlFor="salesperson">Salesperson</Label>
+                <Select value={formData.salesperson} onValueChange={(value) => setFormData((prev) => ({ ...prev, salesperson: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select salesperson" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="sales_staff">Sales Staff</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="notes">Notes (Optional)</Label>
@@ -412,6 +624,90 @@ export default function GasSalesPage() {
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 {isSubmitting ? 'Saving...' : 'Save Sale'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isEditSaleOpen}
+        onOpenChange={(open) => {
+          setIsEditSaleOpen(open)
+          if (!open) setEditingSale(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Gas Sale</DialogTitle>
+            <DialogDescription>Update the selected gas sale transaction.</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleUpdateSale} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-quantity">Kg Sold</Label>
+              <Input
+                id="edit-quantity"
+                type="number"
+                min="1"
+                value={editFormData.quantity}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, quantity: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-paymentMethod">Payment Method</Label>
+              <Select value={editFormData.paymentMethod} onValueChange={(value) => setEditFormData((prev) => ({ ...prev, paymentMethod: value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="cash">Cash on Hand</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-amount">Total Amount</Label>
+              <Input
+                id="edit-amount"
+                type="number"
+                min="1"
+                value={editFormData.amount}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, amount: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-salesperson">Salesperson</Label>
+              <Select value={editFormData.salesperson} onValueChange={(value) => setEditFormData((prev) => ({ ...prev, salesperson: value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select salesperson" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="sales_staff">Sales Staff</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Input
+                id="edit-notes"
+                value={editFormData.notes}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, notes: e.target.value }))}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditSaleOpen(false)} disabled={isSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                {isSubmitting ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
           </form>

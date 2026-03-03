@@ -8,23 +8,73 @@ import { useAuth } from '@/context/auth-context'
 import { BarChart3, TrendingUp, Download } from 'lucide-react'
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { Bar, BarChart, CartesianGrid, XAxis } from 'recharts'
-import { mockBranches, mockGasTransactions, mockShiftReconciliation } from '@/lib/mock-data'
+import { apiService } from '@/lib/api'
 import type { GasTransaction, ShiftReconciliation } from '@/types'
-import { getAllGasSales } from '@/lib/gas-sales-store'
-import { getAllFuelShifts } from '@/lib/fuel-shift-store'
 
 export default function ReportsPage() {
   const { user, selectedBranchId, selectedBranchType } = useAuth()
-  const [gasSalesRecords, setGasSalesRecords] = useState<GasTransaction[]>(
-    mockGasTransactions.filter((transaction) => transaction.type === 'sale')
-  )
-  const [fuelShiftRecords, setFuelShiftRecords] = useState<ShiftReconciliation[]>(mockShiftReconciliation)
+  const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const [gasSalesRecords, setGasSalesRecords] = useState<GasTransaction[]>([])
+  const [fuelShiftRecords, setFuelShiftRecords] = useState<ShiftReconciliation[]>([])
+  const [branches, setBranches] = useState<any[]>([])
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
   const [hasInitializedDate, setHasInitializedDate] = useState(false)
 
   const reloadRecords = useCallback(() => {
-    setGasSalesRecords(getAllGasSales())
-    setFuelShiftRecords(getAllFuelShifts())
+    const load = async () => {
+      const allBranches = await apiService.getBranches().catch(() => [])
+      const branchList = Array.isArray(allBranches) ? allBranches : []
+      setBranches(branchList)
+
+      const gasBranches = branchList.filter((branch: any) => branch.type === 'gas')
+      const fuelBranches = branchList.filter((branch: any) => branch.type === 'fuel')
+
+      const [gasSalesByBranch, fuelShiftsByBranch] = await Promise.all([
+        Promise.all(
+          gasBranches.map(async (branch: any) => ({
+            branchId: String(branch.id),
+            payload: await apiService.getGasSales(branch.id).catch(() => []),
+          }))
+        ),
+        Promise.all(
+          fuelBranches.map(async (branch: any) => ({
+            branchId: String(branch.id),
+            payload: await apiService.getShiftReconciliations(branch.id).catch(() => []),
+          }))
+        ),
+      ])
+
+      const gasSales = gasSalesByBranch.flatMap(({ branchId, payload }) =>
+        toRecordList(payload).map((item: any) => ({
+          id: item.id,
+          branch_id: String(item.branch_id ?? item.branchId ?? item.branch?.id ?? branchId ?? ''),
+          type: item.type ?? 'sale',
+          cylinder_size: item.cylinder_size ?? item.cylinderSize ?? '',
+          quantity: Number(item.quantity ?? 0),
+          amount: Number(item.amount ?? 0),
+          notes: item.notes ?? '',
+          created_at: item.created_at ?? item.createdAt ?? new Date().toISOString(),
+        }))
+      )
+
+      const fuelShifts = fuelShiftsByBranch.flatMap(({ branchId, payload }) =>
+        toRecordList(payload).map((item: any) => ({
+        id: item.id,
+        branch_id: String(item.branch_id ?? item.branchId ?? item.branch?.id ?? branchId ?? ''),
+        shift_number: Number(item.shift_number ?? 0),
+        pump_id: String(item.pump_id ?? item.pump?.id ?? ''),
+        start_reading: Number(item.start_reading ?? item.startReading ?? 0),
+        end_reading: Number(item.end_reading ?? item.endReading ?? 0),
+        sales_amount: Number(item.sales_amount ?? item.salesAmount ?? 0),
+        variance: Number(item.variance ?? 0),
+        created_at: item.created_at ?? item.createdAt ?? new Date().toISOString(),
+      }))
+      )
+
+      setGasSalesRecords(gasSales as GasTransaction[])
+      setFuelShiftRecords(fuelShifts as ShiftReconciliation[])
+    }
+    load()
   }, [])
 
   useEffect(() => {
@@ -45,22 +95,29 @@ export default function ReportsPage() {
   }, [reloadRecords])
 
   const isOrgOwner = user?.role === 'org_owner'
-  const showGas = isOrgOwner || selectedBranchType === 'gas' || user?.role === 'gas_manager'
-  const showFuel = isOrgOwner || selectedBranchType === 'fuel' || user?.role === 'fuel_manager'
+  const showGas = selectedBranchType
+    ? selectedBranchType === 'gas'
+    : isOrgOwner || user?.role === 'gas_manager'
+  const showFuel = (selectedBranchType
+    ? selectedBranchType === 'fuel'
+    : isOrgOwner || user?.role === 'fuel_manager') && !isPersonalOwner
 
   const allowedBranchIds = useMemo(() => {
     if (!user) return new Set<string>()
-    if (isOrgOwner) return new Set(user.assigned_branches)
+    if (isOrgOwner) {
+      // Org owner report should aggregate all branches by default.
+      return new Set(branches.map((branch: any) => String(branch.id)))
+    }
     if (selectedBranchId) return new Set([selectedBranchId])
-    return new Set(user.assigned_branches)
-  }, [user, isOrgOwner, selectedBranchId])
+    return new Set(user.assigned_branches.map((id) => String(id)))
+  }, [user, isOrgOwner, branches, selectedBranchId])
 
   const scopedGasSales = useMemo(
-    () => gasSalesRecords.filter((transaction) => allowedBranchIds.has(transaction.branch_id)),
+    () => gasSalesRecords.filter((transaction) => allowedBranchIds.has(String(transaction.branch_id))),
     [gasSalesRecords, allowedBranchIds]
   )
   const scopedFuelShifts = useMemo(
-    () => fuelShiftRecords.filter((shift) => allowedBranchIds.has(shift.branch_id)),
+    () => fuelShiftRecords.filter((shift) => allowedBranchIds.has(String(shift.branch_id))),
     [fuelShiftRecords, allowedBranchIds]
   )
 
@@ -82,12 +139,25 @@ export default function ReportsPage() {
     return dates.sort((a, b) => (a < b ? 1 : -1))[0]
   }, [scopedGasSales, scopedFuelShifts])
 
+  const availableDateKeys = useMemo(() => {
+    const keys = new Set<string>()
+    scopedGasSales.forEach((transaction) => keys.add(toDateKey(new Date(transaction.created_at))))
+    scopedFuelShifts.forEach((shift) => keys.add(toDateKey(new Date(shift.created_at))))
+    return keys
+  }, [scopedGasSales, scopedFuelShifts])
+
   useEffect(() => {
     if (!hasInitializedDate && latestAvailableDate) {
       setSelectedDate(latestAvailableDate)
       setHasInitializedDate(true)
     }
   }, [hasInitializedDate, latestAvailableDate])
+
+  useEffect(() => {
+    if (latestAvailableDate && availableDateKeys.size > 0 && !availableDateKeys.has(selectedDate)) {
+      setSelectedDate(latestAvailableDate)
+    }
+  }, [selectedDate, latestAvailableDate, availableDateKeys])
 
   const gasDailySales = gasForDate.reduce((sum, transaction) => sum + transaction.amount, 0)
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
@@ -113,11 +183,11 @@ export default function ReportsPage() {
   const handleExportReport = () => {
     const dateLabel = formatSelectedDate(selectedDate)
     const gasLines = gasForDate.map((transaction) => {
-      const branch = mockBranches.find((item) => item.id === transaction.branch_id)
+      const branch = branches.find((item) => String(item.id) === String(transaction.branch_id))
       return ['Gas', branch?.name ?? transaction.branch_id, transaction.quantity, transaction.amount, transaction.created_at]
     })
     const fuelLines = fuelForDate.map((shift) => {
-      const branch = mockBranches.find((item) => item.id === shift.branch_id)
+      const branch = branches.find((item) => String(item.id) === String(shift.branch_id))
       const volume = Math.max(0, shift.end_reading - shift.start_reading)
       return ['Fuel', branch?.name ?? shift.branch_id, volume, shift.sales_amount, shift.created_at]
     })
@@ -203,7 +273,7 @@ export default function ReportsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
                 label="Total Sales"
-                value={`₦${(gasDailySales / 1000000).toFixed(2)}M`}
+                value={formatMoneyShort(gasDailySales)}
                 icon={TrendingUp}
                 variant="secondary"
               />
@@ -219,7 +289,7 @@ export default function ReportsPage() {
               />
               <MetricCard
                 label="Average Sale"
-                value={`₦${(gasForDate.length ? gasDailySales / gasForDate.length : 0).toLocaleString()}`}
+                value={formatMoney(gasForDate.length ? gasDailySales / gasForDate.length : 0)}
                 variant="default"
               />
             </div>
@@ -251,7 +321,7 @@ export default function ReportsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
                 label="Total Sales"
-                value={`₦${(fuelDailySales / 1000000).toFixed(2)}M`}
+                value={formatMoneyShort(fuelDailySales)}
                 icon={TrendingUp}
                 variant="accent"
               />
@@ -267,7 +337,7 @@ export default function ReportsPage() {
               />
               <MetricCard
                 label="Average Shift Sale"
-                value={`₦${(fuelForDate.length ? fuelDailySales / fuelForDate.length : 0).toLocaleString()}`}
+                value={formatMoney(fuelForDate.length ? fuelDailySales / fuelForDate.length : 0)}
                 variant="default"
               />
             </div>
@@ -313,6 +383,27 @@ function formatSelectedDate(dateKey: string): string {
   })
 }
 
+function formatMoney(amount: number): string {
+  return `\u20A6${Math.round(amount).toLocaleString()}`
+}
+
+function formatMoneyShort(amount: number): string {
+  if (Math.abs(amount) >= 1000000) {
+    return `\u20A6${(amount / 1000000).toFixed(2)}M`
+  }
+  if (Math.abs(amount) >= 1000) {
+    return `\u20A6${(amount / 1000).toFixed(2)}K`
+  }
+  return formatMoney(amount)
+}
+
+function toRecordList(payload: any): any[] {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.data)) return payload.data
+  if (Array.isArray(payload?.items)) return payload.items
+  return []
+}
+
 function buildDailySeries<T extends { created_at: string }>(
   records: T[],
   getAmount: (record: T) => number,
@@ -334,3 +425,4 @@ function buildDailySeries<T extends { created_at: string }>(
   }
   return series
 }
+

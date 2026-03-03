@@ -1,8 +1,8 @@
 'use client'
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { User, AuthContextType, BranchType, UserRole } from '@/types'
-import { mockUsers, mockBranches } from '@/lib/mock-data'
+import { User, AuthContextType, BranchType } from '@/types'
+import { apiService } from '@/lib/api'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
@@ -14,6 +14,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Hydrate from localStorage on mount to prevent hydration mismatch
   useEffect(() => {
+    const refreshProfile = async () => {
+      const token = localStorage.getItem('token')
+      if (!token) return
+      try {
+        const profile = await apiService.getProfile()
+        const latestUser = profile?.user
+        if (latestUser) {
+          setUser(latestUser)
+          localStorage.setItem('energyflow_user', JSON.stringify(latestUser))
+          await hydrateBranchSelection(latestUser)
+        }
+      } catch {
+        // ignore profile refresh errors on boot
+      }
+    }
+
     try {
       const storedUser = localStorage.getItem('energyflow_user')
       const storedBranchId = localStorage.getItem('energyflow_branch_id')
@@ -21,6 +37,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (storedUser) {
         const parsedUser = JSON.parse(storedUser)
+        if (!parsedUser?.id && parsedUser?.user_id) {
+          parsedUser.id = parsedUser.user_id
+        }
         setUser(parsedUser)
         if (storedBranchId) setSelectedBranchId(storedBranchId)
         if (storedBranchType) setSelectedBranchType(storedBranchType as BranchType)
@@ -31,43 +50,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('energyflow_branch_id')
       localStorage.removeItem('energyflow_branch_type')
     }
+    refreshProfile()
     setMounted(true)
   }, [])
 
-  const login = (
-    email: string,
-    _password: string,
-    role: UserRole,
-    branchId?: string,
-    branchType?: BranchType
-  ) => {
-    // Mock authentication - in production, this would call your backend API
-    const mockUser = Object.values(mockUsers).find(u => u.role === role)
-    
-    if (mockUser) {
-      const updatedUser = {
-        ...mockUser,
-        email,
-      }
-      
-      setUser(updatedUser)
-      localStorage.setItem('energyflow_user', JSON.stringify(updatedUser))
-      
-      if (branchId && branchType) {
-        setSelectedBranchId(branchId)
-        setSelectedBranchType(branchType)
-        localStorage.setItem('energyflow_branch_id', branchId)
-        localStorage.setItem('energyflow_branch_type', branchType)
-      } else if (role !== 'org_owner' && role !== 'super_admin' && mockUser.assigned_branches.length > 0) {
-        // Auto-select first branch if not specified
-        const branch = mockBranches.find(b => b.id === mockUser.assigned_branches[0])
-        if (branch) {
-          setSelectedBranchId(branch.id)
-          setSelectedBranchType(branch.type)
-          localStorage.setItem('energyflow_branch_id', branch.id)
-          localStorage.setItem('energyflow_branch_type', branch.type)
-        }
-      }
+  const hydrateBranchSelection = async (currentUser: User) => {
+    try {
+      const branches = await apiService.getBranches()
+      const branchList = Array.isArray(branches) ? branches : []
+      if (branchList.length === 0) return
+
+      const storedBranchId = localStorage.getItem('energyflow_branch_id')
+      const assignedSet = new Set(currentUser.assigned_branches ?? [])
+
+      const canUseStored = storedBranchId
+        ? branchList.some(
+            (b: any) =>
+              b.id === storedBranchId &&
+              (currentUser.role === 'org_owner' || assignedSet.size === 0 || assignedSet.has(b.id)),
+          )
+        : false
+
+      const preferredBranch = canUseStored
+        ? branchList.find((b: any) => b.id === storedBranchId)
+        : assignedSet.size > 0
+          ? branchList.find((b: any) => assignedSet.has(b.id))
+          : branchList[0]
+
+      if (!preferredBranch) return
+
+      setSelectedBranchId(preferredBranch.id)
+      setSelectedBranchType(preferredBranch.type)
+      localStorage.setItem('energyflow_branch_id', preferredBranch.id)
+      localStorage.setItem('energyflow_branch_type', preferredBranch.type)
+    } catch {
+      // ignore hydrate errors
+    }
+  }
+
+  const login = async (email: string, password: string) => {
+    const result = await apiService.login(email, password)
+    const token = result?.access_token
+    const currentUser = result?.user as User | undefined
+    if (token) {
+      localStorage.setItem('token', token)
+    }
+    if (currentUser) {
+      setUser(currentUser)
+      localStorage.setItem('energyflow_user', JSON.stringify(currentUser))
+      await hydrateBranchSelection(currentUser)
+    }
+  }
+
+  const register = async (data: {
+    name: string
+    email: string
+    password: string
+    businessName: string
+    plan: 'personal' | 'organisation'
+  }) => {
+    const result = await apiService.register({
+      name: data.name,
+      email: data.email,
+      password: data.password,
+      business_name: data.businessName,
+      plan: data.plan,
+    })
+    const token = result?.access_token
+    const currentUser = result?.user as User | undefined
+    if (token) {
+      localStorage.setItem('token', token)
+    }
+    if (currentUser) {
+      setUser(currentUser)
+      localStorage.setItem('energyflow_user', JSON.stringify(currentUser))
+      await hydrateBranchSelection(currentUser)
     }
   }
 
@@ -78,6 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('energyflow_user')
     localStorage.removeItem('energyflow_branch_id')
     localStorage.removeItem('energyflow_branch_type')
+    localStorage.removeItem('token')
+    apiService.logout().catch(() => null)
   }
 
   const selectBranch = (branchId: string, branchType: BranchType) => {
@@ -93,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     selectedBranchId,
     selectedBranchType,
     login,
+    register,
     logout,
     selectBranch,
   }

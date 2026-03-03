@@ -1,15 +1,17 @@
-'use client'
+﻿'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/metric-card'
 import { AlertCircle, TrendingDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { apiService } from '@/lib/api'
+import { useAuth } from '@/context/auth-context'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
   Dialog,
   DialogContent,
@@ -24,75 +26,163 @@ type ExpenseSource = 'Gas' | 'Fuel'
 type ExpenseItem = {
   id: string
   source: ExpenseSource
+  branch_name?: string
   category: string
   amount: number
   description: string
   created_at: string
 }
 
-const mockGasExpenses = [
-  {
-    id: 'exp-1',
-    source: 'Gas',
-    category: 'cylinder_repair',
-    amount: 25000,
-    description: 'Repair of 3 damaged cylinders',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'exp-2',
-    source: 'Gas',
-    category: 'safety_inspection',
-    amount: 15000,
-    description: 'Monthly safety inspection',
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-  },
-]
-
-const mockFuelExpenses = [
-  {
-    id: 'fexp-1',
-    source: 'Fuel',
-    category: 'pump_maintenance',
-    amount: 45000,
-    description: 'Pump 1 and 2 maintenance service',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'fexp-2',
-    source: 'Fuel',
-    category: 'tank_cleaning',
-    amount: 30000,
-    description: 'Main storage tank cleaning and inspection',
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    id: 'fexp-3',
-    source: 'Fuel',
-    category: 'filter_replacement',
-    amount: 15000,
-    description: 'Fuel filter replacement',
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-  },
-]
-
 export default function ExpensesPage() {
-  const [gasExpenses, setGasExpenses] = useState<ExpenseItem[]>(mockGasExpenses)
-  const [fuelExpenses, setFuelExpenses] = useState<ExpenseItem[]>(mockFuelExpenses)
+  const { user, selectedBranchId, selectedBranchType } = useAuth()
+  const isOwner = user?.role === 'org_owner'
+  const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const [gasExpenses, setGasExpenses] = useState<ExpenseItem[]>([])
+  const [fuelExpenses, setFuelExpenses] = useState<ExpenseItem[]>([])
+  const [gasBranches, setGasBranches] = useState<any[]>([])
+  const [fuelBranches, setFuelBranches] = useState<any[]>([])
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [formData, setFormData] = useState({
     source: 'Gas' as ExpenseSource,
+    branchId: '',
     category: 'cylinder_repair',
     amount: '',
     description: '',
   })
-  const expenses = [...gasExpenses, ...fuelExpenses]
+
+  const expenses = [...gasExpenses, ...fuelExpenses].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0)
   const avgExpense = expenses.length > 0 ? totalExpenses / expenses.length : 0
 
+  const groupByMonth = (items: ExpenseItem[]) => {
+    const groups: Record<string, ExpenseItem[]> = {}
+    items.forEach((item) => {
+      const date = new Date(item.created_at)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!groups[key]) groups[key] = []
+      groups[key].push(item)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const monthGroups = groupByMonth(expenses)
+  const currentMonth = new Date().toISOString().slice(0, 7)
+
+  const loadExpenses = async () => {
+    setIsLoading(true)
+    try {
+      const toList = (payload: any) => {
+        if (Array.isArray(payload)) return payload
+        if (Array.isArray(payload?.data)) return payload.data
+        if (Array.isArray(payload?.items)) return payload.items
+        return []
+      }
+      const branches = await apiService.getBranches().catch(() => [])
+      let branchList = toList(branches)
+      if (isPersonalOwner && branchList.length === 0) {
+        const gasBranches = await apiService.getGasBranches().catch(() => [])
+        branchList = toList(gasBranches)
+      }
+
+      const scopedBranches = (() => {
+        if (user?.role === 'org_owner') return branchList
+        const assigned = new Set(user?.assigned_branches ?? [])
+        if (assigned.size > 0) {
+          return branchList.filter((b: any) => assigned.has(b.id))
+        }
+        if (selectedBranchId) {
+          const selected = branchList.find((b: any) => b.id === selectedBranchId)
+          return selected ? [selected] : branchList
+        }
+        if (selectedBranchType) {
+          const filtered = branchList.filter((b: any) => b.type === selectedBranchType)
+          return filtered.length > 0 ? filtered : branchList
+        }
+        return branchList
+      })()
+
+      const gasList = scopedBranches.filter((b: any) => b.type === 'gas')
+      const fuelList = scopedBranches.filter((b: any) => b.type === 'fuel')
+      setGasBranches(gasList)
+      setFuelBranches(fuelList)
+
+      const [allGasExpenses, allFuelExpenses] = await Promise.all([
+        apiService.getAllGasExpenses().catch(() => []),
+        apiService.getAllFuelExpenses().catch(() => []),
+      ])
+      const allowedBranchIds = new Set(scopedBranches.map((b: any) => String(b.id)))
+      const branchNameById = new Map(scopedBranches.map((b: any) => [String(b.id), String(b.name)]))
+      const shouldFilterByBranch = !(isOwner && isPersonalOwner)
+      const gasRows = toList(allGasExpenses).filter((e: any) =>
+        shouldFilterByBranch && allowedBranchIds.size > 0
+          ? allowedBranchIds.has(String(e.branch?.id ?? e.branch_id ?? ''))
+          : true,
+      )
+      const fuelRows = toList(allFuelExpenses).filter((e: any) =>
+        shouldFilterByBranch && allowedBranchIds.size > 0
+          ? allowedBranchIds.has(String(e.branch?.id ?? e.branch_id ?? ''))
+          : true,
+      )
+
+      setGasExpenses(
+        gasRows.map((e: any) => ({
+          id: String(e.id),
+          source: 'Gas' as const,
+          branch_name: String(e.branch?.name ?? branchNameById.get(String(e.branch?.id ?? e.branch_id ?? '')) ?? ''),
+          category: String(e.category ?? ''),
+          amount: Number(e.amount ?? 0),
+          description: String(e.description ?? ''),
+          created_at: String(e.created_at ?? new Date().toISOString()),
+        })),
+      )
+      setFuelExpenses(
+        fuelRows.map((e: any) => ({
+          id: String(e.id),
+          source: 'Fuel' as const,
+          branch_name: String(e.branch?.name ?? branchNameById.get(String(e.branch?.id ?? e.branch_id ?? '')) ?? ''),
+          category: String(e.category ?? ''),
+          amount: Number(e.amount ?? 0),
+          description: String(e.description ?? ''),
+          created_at: String(e.created_at ?? new Date().toISOString()),
+        })),
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadExpenses()
+  }, [user?.id, selectedBranchId, selectedBranchType, isPersonalOwner])
+
+  const currentSourceBranches = useMemo(
+    () => (formData.source === 'Gas' ? gasBranches : fuelBranches),
+    [formData.source, gasBranches, fuelBranches],
+  )
+
+  useEffect(() => {
+    if (!currentSourceBranches.length) {
+      setFormData((prev) => ({ ...prev, branchId: '' }))
+      return
+    }
+    setFormData((prev) => {
+      if (prev.branchId && currentSourceBranches.some((b: any) => b.id === prev.branchId)) {
+        return prev
+      }
+      return { ...prev, branchId: currentSourceBranches[0].id }
+    })
+  }, [currentSourceBranches])
+
   const getCategoryLabel = (category: string) => {
-    return category.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    return category
+      .replace(/_/g, ' ')
+      .split(' ')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ')
   }
 
   const getCategoryColor = (category: string) => {
@@ -120,23 +210,11 @@ export default function ExpensesPage() {
     })
   }
 
-  const groupByMonth = (expenses: ExpenseItem[]) => {
-    const groups: Record<string, ExpenseItem[]> = {}
-    expenses.forEach((e) => {
-      const date = new Date(e.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-      if (!groups[key]) groups[key] = []
-      groups[key].push(e)
-    })
-    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
-  }
-
-  const monthGroups = groupByMonth(expenses)
-  const currentMonth = new Date().toISOString().slice(0, 7)
-
   const resetForm = () => {
+    const defaultBranch = (formData.source === 'Gas' ? gasBranches[0]?.id : fuelBranches[0]?.id) ?? ''
     setFormData({
       source: 'Gas',
+      branchId: defaultBranch,
       category: 'cylinder_repair',
       amount: '',
       description: '',
@@ -144,9 +222,11 @@ export default function ExpensesPage() {
   }
 
   const handleSourceChange = (source: ExpenseSource) => {
+    const sourceBranches = source === 'Gas' ? gasBranches : fuelBranches
     setFormData((prev) => ({
       ...prev,
       source,
+      branchId: sourceBranches[0]?.id ?? '',
       category: source === 'Gas' ? 'cylinder_repair' : 'pump_maintenance',
     }))
   }
@@ -156,10 +236,10 @@ export default function ExpensesPage() {
     const amount = Number(formData.amount)
     const description = formData.description.trim()
 
-    if (!formData.category || !description || !amount) {
+    if (!formData.branchId || !formData.category || !description || !amount) {
       toast({
         title: 'Missing details',
-        description: 'Source, category, amount, and description are required.',
+        description: 'Source, branch, category, amount, and description are required.',
       })
       return
     }
@@ -174,27 +254,34 @@ export default function ExpensesPage() {
 
     setIsSubmitting(true)
     try {
-      const nextExpense: ExpenseItem = {
-        id: `${formData.source === 'Gas' ? 'exp' : 'fexp'}-${Date.now()}`,
-        source: formData.source,
-        category: formData.category,
-        amount,
-        description,
-        created_at: new Date().toISOString(),
-      }
-
       if (formData.source === 'Gas') {
-        setGasExpenses((prev) => [nextExpense, ...prev])
+        await apiService.createGasExpense({
+          branch_id: formData.branchId,
+          category: formData.category,
+          amount,
+          description,
+        })
       } else {
-        setFuelExpenses((prev) => [nextExpense, ...prev])
+        await apiService.createFuelExpense({
+          branch_id: formData.branchId,
+          category: formData.category,
+          amount,
+          description,
+        })
       }
 
       toast({
         title: 'Expense recorded',
-        description: `${nextExpense.source} expense added successfully.`,
+        description: `${formData.source} expense added successfully.`,
       })
+      await loadExpenses()
       setIsExpenseModalOpen(false)
-      resetForm()
+      setFormData((prev) => ({ ...prev, amount: '', description: '' }))
+    } catch (error) {
+      toast({
+        title: 'Failed to save expense',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -208,35 +295,17 @@ export default function ExpensesPage() {
             <AlertCircle className="w-8 h-8 text-secondary" />
             Expenses
           </h1>
-          <p className="text-muted-foreground">
-            Track and manage expenses across all branches
-          </p>
+          <p className="text-muted-foreground">Track and manage expenses across all branches</p>
         </div>
-        <Button
-          onClick={() => setIsExpenseModalOpen(true)}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
+        <Button onClick={() => setIsExpenseModalOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
           Record Expense
         </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <MetricCard
-          label="Total Expenses"
-          value={`₦${(totalExpenses / 1000).toFixed(0)}K`}
-          icon={TrendingDown}
-          variant="primary"
-        />
-        <MetricCard
-          label="Average Expense"
-          value={`₦${(avgExpense / 1000).toFixed(0)}K`}
-          variant="secondary"
-        />
-        <MetricCard
-          label="Expense Count"
-          value={expenses.length}
-          variant="accent"
-        />
+        <MetricCard label="Total Expenses" value={`N${(totalExpenses / 1000).toFixed(0)}K`} icon={TrendingDown} variant="primary" />
+        <MetricCard label="Average Expense" value={`N${(avgExpense / 1000).toFixed(0)}K`} variant="secondary" />
+        <MetricCard label="Expense Count" value={expenses.length} variant="accent" />
       </div>
 
       <Card className="shadow-card">
@@ -244,7 +313,11 @@ export default function ExpensesPage() {
           <h3 className="text-lg font-semibold text-foreground">Expense Records</h3>
         </div>
 
-        {expenses.length === 0 ? (
+        {isLoading ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">Loading expenses...</p>
+          </div>
+        ) : expenses.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>
@@ -253,15 +326,15 @@ export default function ExpensesPage() {
             {monthGroups.map(([monthKey, monthExpenses]) => {
               const date = new Date(monthKey + '-01')
               const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0)
-              
+              const monthTotal = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+
               return (
                 <AccordionItem key={monthKey} value={monthKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
                       <span className="font-semibold">{monthName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthExpenses.length} expenses • ₦{monthTotal.toLocaleString()}
+                        {monthExpenses.length} expenses • N{monthTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -272,6 +345,7 @@ export default function ExpensesPage() {
                           <tr className="border-b border-border bg-muted/50">
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Type</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
@@ -282,13 +356,12 @@ export default function ExpensesPage() {
                             <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
                               <td className="px-6 py-4 text-foreground">{expense.source}</td>
+                              <td className="px-6 py-4 text-foreground">{expense.branch_name || '-'}</td>
                               <td className="px-6 py-4">
-                                <Badge className={getCategoryColor(expense.category)}>
-                                  {getCategoryLabel(expense.category)}
-                                </Badge>
+                                <Badge className={getCategoryColor(expense.category)}>{getCategoryLabel(expense.category)}</Badge>
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.description}</td>
-                              <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">N{expense.amount.toLocaleString()}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -312,9 +385,7 @@ export default function ExpensesPage() {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Record Expense</DialogTitle>
-            <DialogDescription>
-              Add an expense entry for gas or fuel operations.
-            </DialogDescription>
+            <DialogDescription>Add an expense entry for gas or fuel operations.</DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleRecordExpense} className="space-y-4">
@@ -332,6 +403,22 @@ export default function ExpensesPage() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="branch">Branch</Label>
+              <select
+                id="branch"
+                value={formData.branchId}
+                onChange={(e) => setFormData((prev) => ({ ...prev, branchId: e.target.value }))}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {currentSourceBranches.map((branch: any) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="category">Category</Label>
               <select
                 id="category"
@@ -343,12 +430,15 @@ export default function ExpensesPage() {
                   <>
                     <option value="cylinder_repair">Cylinder Repair</option>
                     <option value="safety_inspection">Safety Inspection</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="other">Other</option>
                   </>
                 ) : (
                   <>
                     <option value="pump_maintenance">Pump Maintenance</option>
                     <option value="tank_cleaning">Tank Cleaning</option>
                     <option value="filter_replacement">Filter Replacement</option>
+                    <option value="other">Other</option>
                   </>
                 )}
               </select>
@@ -377,12 +467,7 @@ export default function ExpensesPage() {
             </div>
 
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsExpenseModalOpen(false)}
-                disabled={isSubmitting}
-              >
+              <Button type="button" variant="outline" onClick={() => setIsExpenseModalOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -395,3 +480,4 @@ export default function ExpensesPage() {
     </div>
   )
 }
+

@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/context/auth-context'
-import { mockBranches } from '@/lib/mock-data'
+import { apiService } from '@/lib/api'
 import {
   LayoutDashboard,
   Fuel,
@@ -22,14 +23,29 @@ import {
 
 export function Sidebar() {
   const { user, logout, selectedBranchId } = useAuth()
+  const [branches, setBranches] = useState<any[]>([])
+  const sidebarTitle = user?.tenant_name || user?.name || 'EnergyFlow'
+  const sidebarSubtitle = user?.tenant_name ? 'Business Account' : 'Management System'
+
+  useEffect(() => {
+    apiService.getBranches().then((data) => {
+      setBranches(Array.isArray(data) ? data : [])
+    }).catch(() => {
+      setBranches([])
+    })
+  }, [])
+
+  const currentBranch = useMemo(
+    () => branches.find((b) => b.id === selectedBranchId),
+    [branches, selectedBranchId]
+  )
 
   if (!user) return null
-
-  const currentBranch = mockBranches.find(b => b.id === selectedBranchId)
 
   // Determine which menu items to show based on role and branch types
   const getMenuItems = () => {
     const items: Array<{ label: string; href: string; icon: any }> = []
+    const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
 
     if (user.role !== 'sales_staff') {
       items.push({
@@ -49,8 +65,32 @@ export function Sidebar() {
         break
 
       case 'org_owner':
-        const hasGas = user.assigned_branch_types.includes('gas')
-        const hasFuel = user.assigned_branch_types.includes('fuel')
+        if (isPersonalOwner) {
+          items.push(
+            { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
+            { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
+            { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
+            { label: 'Inventory', href: '/gas/inventory', icon: Package },
+            { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
+            { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
+            { label: 'User', href: '/users', icon: Users },
+            { label: 'Reports', href: '/reports', icon: FileText },
+          )
+          break
+        }
+
+        const hasAssignedTypes = user.assigned_branch_types.length > 0
+        const inferredType = currentBranch?.type
+        const hasGas =
+          user.assigned_branch_types.includes('gas') ||
+          user.tenant_branch_types?.includes('gas') ||
+          inferredType === 'gas' ||
+          !hasAssignedTypes
+        const hasFuel =
+          user.assigned_branch_types.includes('fuel') ||
+          user.tenant_branch_types?.includes('fuel') ||
+          inferredType === 'fuel' ||
+          !hasAssignedTypes
 
         if (hasGas && hasFuel) {
           items.push(
@@ -83,9 +123,11 @@ export function Sidebar() {
 
         items.push(
           { label: 'Reports', href: '/reports', icon: FileText },
-          { label: 'Users', href: '/users', icon: Users },
           { label: 'Expenses', href: '/expenses', icon: AlertCircle },
         )
+        if (!isPersonalOwner) {
+          items.push({ label: 'Users', href: '/users', icon: Users })
+        }
         break
 
       case 'gas_manager':
@@ -133,8 +175,8 @@ export function Sidebar() {
             <Wind className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold">EnergyFlow</h1>
-            <p className="text-xs text-sidebar-foreground/60">Management System</p>
+            <h1 className="text-lg font-bold truncate">{sidebarTitle}</h1>
+            <p className="text-xs text-sidebar-foreground/60">{sidebarSubtitle}</p>
           </div>
         </div>
       </div>

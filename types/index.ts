@@ -8,6 +8,9 @@ export interface User {
   name: string
   role: UserRole
   tenant_id: string
+  tenant_name?: string
+  subscription_plan?: 'personal' | 'organisation'
+  tenant_branch_types?: BranchType[]
   assigned_branches: string[]
   assigned_branch_types: BranchType[]
   created_at: string
@@ -18,7 +21,8 @@ export interface AuthContextType {
   isAuthenticated: boolean
   selectedBranchId: string | null
   selectedBranchType: BranchType | null
-  login: (email: string, password: string, role: UserRole, branchId?: string, branchType?: BranchType) => void
+  login: (email: string, password: string) => Promise<void>
+  register: (data: { name: string; email: string; password: string; businessName: string; plan: 'personal' | 'organisation' }) => Promise<void>
   logout: () => void
   selectBranch: (branchId: string, branchType: BranchType) => void
 }
@@ -49,7 +53,7 @@ export interface Branch {
 export interface GasCylinder {
   id: string
   branch_id: string
-  size: '12.5kg' | '25kg' | '50kg'
+  size: string
   status: 'in_stock' | 'refilling' | 'damaged'
   quantity: number
   purchase_price: number
