@@ -431,7 +431,7 @@ export default function FuelExpensesPage() {
         />
         <MetricCard
           label="Average Sale"
-          value={`N${Math.round(averageSale).toLocaleString()}`}
+          value={`N${Math.round(averageSale - totalExpenses).toLocaleString()}`}
           variant="secondary"
         />
         <MetricCard
