@@ -19,11 +19,14 @@ import {
   Activity,
   BarChart3,
   TrendingUp,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 
 export function Sidebar() {
   const { user, logout, selectedBranchId } = useAuth()
   const [branches, setBranches] = useState<any[]>([])
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({})
   const sidebarTitle = user?.tenant_name || user?.name || 'EnergyFlow'
   const sidebarSubtitle = user?.tenant_name ? 'Business Account' : 'Management System'
 
@@ -42,9 +45,13 @@ export function Sidebar() {
 
   if (!user) return null
 
+  const toggleMenu = (label: string) => {
+    setExpandedMenus(prev => ({ ...prev, [label]: !prev[label] }))
+  }
+
   // Determine which menu items to show based on role and branch types
   const getMenuItems = () => {
-    const items: Array<{ label: string; href: string; icon: any }> = []
+    const items: Array<{ label: string; href?: string; icon: any; children?: Array<{ label: string; href: string; icon: any }> }> = []
     const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
 
     if (user.role !== 'sales_staff') {
@@ -99,9 +106,25 @@ export function Sidebar() {
             { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
             { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
             { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
-            { label: 'Gas Sales', href: '/gas/sales', icon: ShoppingCart },
-            { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
-            { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign }
+            {
+              label: 'Gas Sales',
+              icon: Wind,
+              children: [
+                { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
+                { label: 'Expenses', href: '/gas/expenses', icon: AlertCircle },
+                { label: 'Inventory', href: '/gas/inventory', icon: Package },
+              ]
+            },
+            {
+              label: 'Fuel Sales',
+              icon: Fuel,
+              children: [
+                { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
+                { label: 'Transfer', href: '/fuel/transfer', icon: DollarSign },
+                { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
+                { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+              ]
+            }
           )
         } else if (hasGas) {
           items.push(
@@ -199,11 +222,47 @@ export function Sidebar() {
         <ul className="space-y-2">
           {menuItems.map((item, idx) => {
             const Icon = item.icon
+            const isExpanded = expandedMenus[item.label]
+
+            if (item.children) {
+              return (
+                <li key={idx}>
+                  <button
+                    onClick={() => toggleMenu(item.label)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-2 rounded-lg text-sidebar-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className="w-5 h-5" />
+                      <span className="font-medium">{item.label}</span>
+                    </div>
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {isExpanded && (
+                    <ul className="ml-8 mt-2 space-y-1">
+                      {item.children.map((child, childIdx) => {
+                        const ChildIcon = child.icon
+                        return (
+                          <li key={childIdx}>
+                            <Link
+                              href={child.href}
+                              className="flex items-center gap-3 px-4 py-2 rounded-lg text-sidebar-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground transition-colors text-sm"
+                            >
+                              <ChildIcon className="w-4 h-4" />
+                              <span>{child.label}</span>
+                            </Link>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </li>
+              )
+            }
 
             return (
               <li key={idx}>
                 <Link
-                  href={item.href}
+                  href={item.href!}
                   className="flex items-center gap-3 px-4 py-2 rounded-lg text-sidebar-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground transition-colors"
                 >
                   <Icon className="w-5 h-5" />

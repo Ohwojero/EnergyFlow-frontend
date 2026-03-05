@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import { DollarSign, Plus, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
+import type { Branch } from '@/types'
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type Transfer = {
   id: string
@@ -28,22 +36,64 @@ type Transfer = {
 
 export default function FuelTransferPage() {
   const { user, selectedBranchId } = useAuth()
+  const isOwner = user?.role === 'org_owner'
+  const [branches, setBranches] = useState<Branch[]>([])
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [shifts, setShifts] = useState<any[]>([])
   const [expenses, setExpenses] = useState(0)
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     amount: '',
     staff_name: '',
   })
 
+  const activeBranchId = useMemo(() => {
+    if (isOwner) return localSelectedBranchId
+    return selectedBranchId
+  }, [isOwner, localSelectedBranchId, selectedBranchId])
+
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const data = await apiService.getFuelBranches().catch(() => [])
+        let fuelList = Array.isArray(data) ? data : []
+        if (fuelList.length === 0) {
+          const allBranches = await apiService.getBranches().catch(() => [])
+          fuelList = (Array.isArray(allBranches) ? allBranches : []).filter(
+            (branch: any) => String(branch?.type ?? '').toLowerCase() === 'fuel',
+          )
+        }
+        setBranches(fuelList)
+      } catch {
+        toast({
+          title: 'Load failed',
+          description: 'Could not load fuel branches.',
+        })
+      }
+    }
+    loadBranches()
+  }, [])
+
   const loadTransfers = async () => {
     try {
-      const data = selectedBranchId 
-        ? await apiService.getFuelTransfers(selectedBranchId)
-        : await apiService.getAllFuelTransfers()
-      setTransfers(Array.isArray(data) ? data : [])
+      if (isOwner) {
+        const targetBranchIds = (localSelectedBranchId
+          ? [localSelectedBranchId]
+          : branches.map((branch) => branch.id)
+        ).filter((id): id is string => Boolean(id))
+        const responses = await Promise.all(
+          targetBranchIds.map((branchId) => apiService.getFuelTransfers(branchId).catch(() => []))
+        )
+        const all = responses.flat()
+        setTransfers(Array.isArray(all) ? all : [])
+      } else {
+        const data = selectedBranchId 
+          ? await apiService.getFuelTransfers(selectedBranchId)
+          : await apiService.getAllFuelTransfers()
+        setTransfers(Array.isArray(data) ? data : [])
+      }
     } catch (error) {
       console.error('Failed to load transfers:', error)
     }
@@ -51,7 +101,26 @@ export default function FuelTransferPage() {
 
   const loadShiftsAndExpenses = async () => {
     try {
-      if (selectedBranchId) {
+      if (isOwner) {
+        const targetBranchIds = (localSelectedBranchId
+          ? [localSelectedBranchId]
+          : branches.map((branch) => branch.id)
+        ).filter((id): id is string => Boolean(id))
+        const [shiftResponses, expenseResponses] = await Promise.all([
+          Promise.all(targetBranchIds.map((branchId) => apiService.getShiftReconciliations(branchId).catch(() => []))),
+          Promise.all(targetBranchIds.map((branchId) => apiService.getFuelExpenses(branchId).catch(() => [])))
+        ])
+        setShifts(shiftResponses.flat())
+        const today = new Date()
+        const todayExpenses = expenseResponses.flat().reduce((sum, exp: any) => {
+          const expDate = new Date(exp.created_at)
+          if (expDate.toDateString() === today.toDateString()) {
+            return sum + Number(exp.amount || 0)
+          }
+          return sum
+        }, 0)
+        setExpenses(todayExpenses)
+      } else if (selectedBranchId) {
         const [shiftData, expenseData] = await Promise.all([
           apiService.getShiftReconciliations(selectedBranchId).catch(() => []),
           apiService.getFuelExpenses(selectedBranchId).catch(() => [])
@@ -73,14 +142,16 @@ export default function FuelTransferPage() {
   }
 
   useEffect(() => {
-    loadTransfers()
-    loadShiftsAndExpenses()
-    const interval = setInterval(() => {
+    if (branches.length > 0 || selectedBranchId || isOwner) {
       loadTransfers()
       loadShiftsAndExpenses()
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [selectedBranchId])
+      const interval = setInterval(() => {
+        loadTransfers()
+        loadShiftsAndExpenses()
+      }, 3000)
+      return () => clearInterval(interval)
+    }
+  }, [selectedBranchId, branches, isOwner, localSelectedBranchId])
 
   const totalTransfers = transfers.reduce((sum, t) => sum + Number(t.amount), 0)
   const today = new Date()
@@ -89,7 +160,7 @@ export default function FuelTransferPage() {
     return shiftDate.toDateString() === today.toDateString()
   })
   const totalSales = todayShifts.reduce((sum, s: any) => sum + Number(s.sales_amount || 0), 0)
-  const averageSales = todayShifts.length > 0 ? (totalSales / todayShifts.length) - expenses : 0
+  const averageSales = todayShifts.length > 0 ? (totalSales / todayShifts.length) - expenses - totalTransfers : 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -111,7 +182,7 @@ export default function FuelTransferPage() {
       return
     }
 
-    if (!selectedBranchId) {
+    if (!activeBranchId) {
       toast({
         title: 'No branch selected',
         description: 'Please select a branch',
@@ -122,7 +193,7 @@ export default function FuelTransferPage() {
     setIsSubmitting(true)
     try {
       await apiService.createFuelTransfer({
-        branch_id: selectedBranchId,
+        branch_id: activeBranchId,
         amount,
         staff_name: formData.staff_name.trim(),
       })
@@ -160,6 +231,27 @@ export default function FuelTransferPage() {
           Record Transfer
         </Button>
       </div>
+
+      {isOwner && (
+        <Card className="p-4 mb-6 bg-muted/50 border-border">
+          <div className="flex items-center gap-4">
+            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+            <Select value={localSelectedBranchId || 'all'} onValueChange={(value) => setLocalSelectedBranchId(value === 'all' ? null : value)}>
+              <SelectTrigger className="w-80">
+                <SelectValue placeholder="All branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch.id} value={branch.id}>
+                    {branch.name} ({branch.location})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card">
