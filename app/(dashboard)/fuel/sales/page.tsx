@@ -343,7 +343,8 @@ export default function FuelSalesPage() {
     [now, salesMetricShifts],
   )
   const totalSales = todaySalesMetricShifts.reduce((sum, shift) => sum + shift.sales_amount, 0)
-  const expTotalSales = totalSales - expenseTotal
+  const averageSales = todaySalesMetricShifts.length > 0 ? totalSales / todaySalesMetricShifts.length : 0
+  const expTotalSales = averageSales - expenseTotal
   const pumpNumberById = useMemo(() => {
     const map = new Map<string, string>()
     fuelPumps.forEach((pump) => {

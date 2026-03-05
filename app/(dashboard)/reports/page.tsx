@@ -190,7 +190,8 @@ export default function ReportsPage() {
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
   const fuelDailySales = fuelForDate.reduce((sum, shift) => sum + shift.sales_amount, 0)
   const fuelDailyExpenses = fuelExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
-  const fuelAfterExpenseSales = fuelDailySales - fuelDailyExpenses
+  const averageFuelSale = fuelForDate.length > 0 ? fuelDailySales / fuelForDate.length : 0
+  const fuelAfterExpenseSales = averageFuelSale - fuelDailyExpenses
   const fuelDailyVolume = fuelForDate.reduce(
     (sum, shift) => sum + Math.max(0, shift.end_reading - shift.start_reading),
     0

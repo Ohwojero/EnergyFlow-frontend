@@ -135,11 +135,12 @@ export default function DashboardPage() {
   const totalBranches = branches.length
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
+  const averageSaleBeforeExpense = salesCount > 0 ? totalSales / salesCount : 0
+  const averageSale = averageSaleBeforeExpense - totalExpenses
   const netFuelSalesAfterExpenses = fuelSales - fuelExpenses
   const netSalesAfterExpenses =
     selectedBranchType === 'fuel' ? netFuelSalesAfterExpenses : totalSales - totalExpenses
   const totalRevenue = totalSales
-  const averageSale = salesCount > 0 ? totalSales / salesCount : 0
   const monthlyGrowth = 18.5
   const formatMoneyShort = (amount: number) => {
     if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`

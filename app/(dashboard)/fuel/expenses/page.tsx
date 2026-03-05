@@ -218,7 +218,7 @@ export default function FuelExpensesPage() {
   const totalExpenses = visibleExpenses
     .filter((exp) => isSameLocalDay(exp.created_at, now))
     .reduce((sum, exp) => sum + exp.amount, 0)
-  const visibleFuelSales = (() => {
+  const visibleFuelSalesTotal = (() => {
     if (isOwner) {
       if (!localSelectedBranchId) {
         return fuelShiftSales
@@ -239,8 +239,21 @@ export default function FuelExpensesPage() {
       .filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now))
       .reduce((sum, row) => sum + row.sales_amount, 0)
   })()
-  const netFuelSalesAfterExpenses = visibleFuelSales - totalExpenses
-  const averageSale = netFuelSalesAfterExpenses
+  const visibleFuelSalesCount = (() => {
+    if (isOwner) {
+      if (!localSelectedBranchId) {
+        return fuelShiftSales.filter((row) => isSameLocalDay(row.created_at, now)).length
+      }
+      return fuelShiftSales.filter((row) => row.branch_id === localSelectedBranchId && isSameLocalDay(row.created_at, now)).length
+    }
+    const targetBranchId = activeFuelBranchId
+    if (!targetBranchId) {
+      return fuelShiftSales.filter((row) => isSameLocalDay(row.created_at, now)).length
+    }
+    return fuelShiftSales.filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now)).length
+  })()
+  const averageSale = visibleFuelSalesCount > 0 ? visibleFuelSalesTotal / visibleFuelSalesCount : 0
+  const netFuelSalesAfterExpenses = averageSale - totalExpenses
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
