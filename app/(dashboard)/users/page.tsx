@@ -97,6 +97,14 @@ export default function UsersPage() {
     return allUsers.filter((u) => u.tenant_id === currentUser.tenant_id)
   }, [allUsers, currentUser])
 
+  const branchNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    tenantBranches.forEach((branch) => {
+      map.set(String(branch.id), branch.name)
+    })
+    return map
+  }, [tenantBranches])
+
   const getRoleBgColor = (role: string) => {
     switch (role) {
       case 'super_admin':
@@ -345,7 +353,11 @@ export default function UsersPage() {
                     </td>
                     {!isPersonalOwner && (
                       <td className="px-6 py-4 text-foreground">
-                        {user.assigned_branches.length} branch{user.assigned_branches.length !== 1 ? 'es' : ''}
+                        {user.assigned_branches.length === 0
+                          ? 'No branch assigned'
+                          : user.assigned_branches
+                              .map((id) => branchNameById.get(String(id)) ?? 'Unknown Branch')
+                              .join(', ')}
                       </td>
                     )}
                     <td className="px-6 py-4">

@@ -33,6 +33,12 @@ type ExpenseItem = {
   _type?: 'fuel' | 'gas'
 }
 
+type FuelShiftSale = {
+  branch_id: string
+  sales_amount: number
+  created_at: string
+}
+
 export default function FuelExpensesPage() {
   const { user, selectedBranchId, selectedBranchType } = useAuth()
   const isOwner = user?.role === 'org_owner'
@@ -49,8 +55,18 @@ export default function FuelExpensesPage() {
     [user?.assigned_branches, fuelBranches]
   )
 
-  const currentBranchInfo = selectedBranchId
-    ? allBranches.find((b) => b.id === selectedBranchId)
+  const activeFuelBranchId = useMemo(() => {
+    if (selectedBranchId && fuelBranches.some((branch) => branch.id === selectedBranchId)) {
+      return selectedBranchId
+    }
+    const assignedFuelBranchId = (user?.assigned_branches ?? []).find((id) =>
+      fuelBranches.some((branch) => branch.id === id),
+    )
+    return assignedFuelBranchId ?? fuelBranches[0]?.id ?? null
+  }, [fuelBranches, selectedBranchId, user?.assigned_branches])
+
+  const currentBranchInfo = activeFuelBranchId
+    ? allBranches.find((b) => b.id === activeFuelBranchId)
     : null
 
   const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(
@@ -59,6 +75,7 @@ export default function FuelExpensesPage() {
 
   const [fuelExpenses, setFuelExpenses] = useState<ExpenseItem[]>([])
   const [gasExpenses, setGasExpenses] = useState<ExpenseItem[]>([])
+  const [fuelShiftSales, setFuelShiftSales] = useState<FuelShiftSale[]>([])
 
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -116,9 +133,19 @@ export default function FuelExpensesPage() {
       setGasBranches(scopedGasBranches)
       setFuelBranches(scopedFuelBranches)
 
-      const [allFuelExpenses, allGasExpenses] = await Promise.all([
+      const [allFuelExpenses, allGasExpenses, fuelShiftsByBranch] = await Promise.all([
         apiService.getAllFuelExpenses().catch(() => []),
         apiService.getAllGasExpenses().catch(() => []),
+        Promise.all(
+          scopedFuelBranches.map(async (branch: any) => ({
+            branchId: String(branch.id),
+            payload: await (
+              isOwner
+                ? apiService.getShiftReconciliations(branch.id)
+                : apiService.getMyShiftReconciliations(branch.id)
+            ).catch(() => []),
+          })),
+        ),
       ])
 
       const allowedFuelIds = new Set(scopedFuelBranches.map((b: any) => String(b.id)))
@@ -142,6 +169,15 @@ export default function FuelExpensesPage() {
           )
           .map((expense: any) => mapExpense(expense, 'gas', branches))
       )
+      setFuelShiftSales(
+        fuelShiftsByBranch.flatMap(({ branchId, payload }) =>
+          (Array.isArray(payload) ? payload : []).map((shift: any) => ({
+            branch_id: String(shift.branch_id ?? shift.branch?.id ?? branchId),
+            sales_amount: Number(shift.sales_amount ?? 0),
+            created_at: String(shift.created_at ?? shift.createdAt ?? new Date().toISOString()),
+          })),
+        ),
+      )
     } finally {
       setIsLoading(false)
     }
@@ -151,9 +187,7 @@ export default function FuelExpensesPage() {
     loadExpenses()
   }, [user?.id, selectedBranchId, selectedBranchType, isOwner])
 
-  const expenses = isOwner
-    ? [...fuelExpenses, ...gasExpenses]
-    : fuelExpenses
+  const expenses = fuelExpenses
 
   const visibleExpenses = (() => {
     const source = expenses
@@ -163,15 +197,50 @@ export default function FuelExpensesPage() {
       }
       return source.filter((e) => e.branch_id === localSelectedBranchId)
     } else {
-      const targetBranchId = selectedBranchId || user?.assigned_branches?.[0] || null
+      const targetBranchId = activeFuelBranchId
       if (!targetBranchId) return source
       const filtered = source.filter((e) => e.branch_id === targetBranchId)
       return filtered
     }
   })()
 
-  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
-  const avgExpense = visibleExpenses.length > 0 ? totalExpenses / visibleExpenses.length : 0
+  const isSameLocalDay = (value: string | Date, today: Date) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return false
+    return (
+      date.getFullYear() === today.getFullYear() &&
+      date.getMonth() === today.getMonth() &&
+      date.getDate() === today.getDate()
+    )
+  }
+
+  const now = new Date()
+  const totalExpenses = visibleExpenses
+    .filter((exp) => isSameLocalDay(exp.created_at, now))
+    .reduce((sum, exp) => sum + exp.amount, 0)
+  const visibleFuelSales = (() => {
+    if (isOwner) {
+      if (!localSelectedBranchId) {
+        return fuelShiftSales
+          .filter((row) => isSameLocalDay(row.created_at, now))
+          .reduce((sum, row) => sum + row.sales_amount, 0)
+      }
+      return fuelShiftSales
+        .filter((row) => row.branch_id === localSelectedBranchId && isSameLocalDay(row.created_at, now))
+        .reduce((sum, row) => sum + row.sales_amount, 0)
+    }
+    const targetBranchId = activeFuelBranchId
+    if (!targetBranchId) {
+      return fuelShiftSales
+        .filter((row) => isSameLocalDay(row.created_at, now))
+        .reduce((sum, row) => sum + row.sales_amount, 0)
+    }
+    return fuelShiftSales
+      .filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now))
+      .reduce((sum, row) => sum + row.sales_amount, 0)
+  })()
+  const netFuelSalesAfterExpenses = visibleFuelSales - totalExpenses
+  const averageSale = netFuelSalesAfterExpenses
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -247,8 +316,7 @@ export default function FuelExpensesPage() {
         user?.assigned_branches?.[0] ??
         fuelBranches[0]?.id ??
         ''
-      : selectedBranchId ??
-        user?.assigned_branches?.[0] ??
+      : activeFuelBranchId ??
         fuelBranches[0]?.id ??
         ''
 
@@ -349,13 +417,13 @@ export default function FuelExpensesPage() {
           variant="primary"
         />
         <MetricCard
-          label="Average Expense"
-          value={`₦${(avgExpense / 1000).toFixed(0)}K`}
+          label="Average Sale"
+          value={`N${Math.round(averageSale).toLocaleString()}`}
           variant="secondary"
         />
         <MetricCard
           label="Expense Count"
-          value={expenses.length}
+          value={visibleExpenses.length}
           variant="accent"
         />
       </div>
@@ -506,3 +574,5 @@ export default function FuelExpensesPage() {
     </div>
   )
 }
+
+

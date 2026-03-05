@@ -109,6 +109,8 @@ export interface ShiftReconciliation {
   end_reading: number
   sales_amount: number
   variance: number
+  created_by_user_id?: string
+  created_by_role?: UserRole
   created_at: string
 }
 

@@ -20,12 +20,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type ExpenseSource = 'Gas' | 'Fuel'
 
 type ExpenseItem = {
   id: string
   source: ExpenseSource
+  branch_id?: string
   branch_name?: string
   category: string
   amount: number
@@ -41,6 +49,7 @@ export default function ExpensesPage() {
   const [fuelExpenses, setFuelExpenses] = useState<ExpenseItem[]>([])
   const [gasBranches, setGasBranches] = useState<any[]>([])
   const [fuelBranches, setFuelBranches] = useState<any[]>([])
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(null)
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -55,8 +64,21 @@ export default function ExpensesPage() {
   const expenses = [...gasExpenses, ...fuelExpenses].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
-  const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0)
-  const avgExpense = expenses.length > 0 ? totalExpenses / expenses.length : 0
+  const allBranches = useMemo(() => {
+    const map = new Map<string, any>()
+    ;[...gasBranches, ...fuelBranches].forEach((branch) => {
+      if (branch?.id) map.set(String(branch.id), branch)
+    })
+    return Array.from(map.values())
+  }, [gasBranches, fuelBranches])
+
+  const visibleExpenses = useMemo(() => {
+    if (!isOwner || !localSelectedBranchId) return expenses
+    return expenses.filter((expense) => String(expense.branch_id ?? '') === localSelectedBranchId)
+  }, [expenses, isOwner, localSelectedBranchId])
+
+  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const avgExpense = visibleExpenses.length > 0 ? totalExpenses / visibleExpenses.length : 0
 
   const groupByMonth = (items: ExpenseItem[]) => {
     const groups: Record<string, ExpenseItem[]> = {}
@@ -69,7 +91,7 @@ export default function ExpensesPage() {
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(expenses)
+  const monthGroups = groupByMonth(visibleExpenses)
   const currentMonth = new Date().toISOString().slice(0, 7)
 
   const loadExpenses = async () => {
@@ -132,6 +154,7 @@ export default function ExpensesPage() {
         gasRows.map((e: any) => ({
           id: String(e.id),
           source: 'Gas' as const,
+          branch_id: String(e.branch?.id ?? e.branch_id ?? ''),
           branch_name: String(e.branch?.name ?? branchNameById.get(String(e.branch?.id ?? e.branch_id ?? '')) ?? ''),
           category: String(e.category ?? ''),
           amount: Number(e.amount ?? 0),
@@ -143,6 +166,7 @@ export default function ExpensesPage() {
         fuelRows.map((e: any) => ({
           id: String(e.id),
           source: 'Fuel' as const,
+          branch_id: String(e.branch?.id ?? e.branch_id ?? ''),
           branch_name: String(e.branch?.name ?? branchNameById.get(String(e.branch?.id ?? e.branch_id ?? '')) ?? ''),
           category: String(e.category ?? ''),
           amount: Number(e.amount ?? 0),
@@ -302,10 +326,34 @@ export default function ExpensesPage() {
         </Button>
       </div>
 
+      {isOwner && (
+        <Card className="p-4 mb-6 bg-muted/50 border-border">
+          <div className="flex items-center gap-4">
+            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+            <Select
+              value={localSelectedBranchId || 'all'}
+              onValueChange={(value) => setLocalSelectedBranchId(value === 'all' ? null : value)}
+            >
+              <SelectTrigger className="w-80">
+                <SelectValue placeholder="All branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {allBranches.map((branch) => (
+                  <SelectItem key={branch.id} value={branch.id}>
+                    {branch.name} ({branch.location})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <MetricCard label="Total Expenses" value={`N${(totalExpenses / 1000).toFixed(0)}K`} icon={TrendingDown} variant="primary" />
         <MetricCard label="Average Expense" value={`N${(avgExpense / 1000).toFixed(0)}K`} variant="secondary" />
-        <MetricCard label="Expense Count" value={expenses.length} variant="accent" />
+        <MetricCard label="Expense Count" value={visibleExpenses.length} variant="accent" />
       </div>
 
       <Card className="shadow-card">
@@ -317,7 +365,7 @@ export default function ExpensesPage() {
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">Loading expenses...</p>
           </div>
-        ) : expenses.length === 0 ? (
+        ) : visibleExpenses.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>

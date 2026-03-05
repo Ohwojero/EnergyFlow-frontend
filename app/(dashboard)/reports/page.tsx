@@ -11,14 +11,21 @@ import { Bar, BarChart, CartesianGrid, XAxis } from 'recharts'
 import { apiService } from '@/lib/api'
 import type { GasTransaction, ShiftReconciliation } from '@/types'
 
+type FuelExpenseRecord = {
+  id: string
+  branch_id: string
+  amount: number
+  created_at: string
+}
+
 export default function ReportsPage() {
   const { user, selectedBranchId, selectedBranchType } = useAuth()
   const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
   const [gasSalesRecords, setGasSalesRecords] = useState<GasTransaction[]>([])
   const [fuelShiftRecords, setFuelShiftRecords] = useState<ShiftReconciliation[]>([])
+  const [fuelExpenseRecords, setFuelExpenseRecords] = useState<FuelExpenseRecord[]>([])
   const [branches, setBranches] = useState<any[]>([])
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
-  const [hasInitializedDate, setHasInitializedDate] = useState(false)
 
   const reloadRecords = useCallback(() => {
     const load = async () => {
@@ -29,7 +36,7 @@ export default function ReportsPage() {
       const gasBranches = branchList.filter((branch: any) => branch.type === 'gas')
       const fuelBranches = branchList.filter((branch: any) => branch.type === 'fuel')
 
-      const [gasSalesByBranch, fuelShiftsByBranch] = await Promise.all([
+      const [gasSalesByBranch, fuelShiftsByBranch, fuelExpensesByBranch] = await Promise.all([
         Promise.all(
           gasBranches.map(async (branch: any) => ({
             branchId: String(branch.id),
@@ -39,7 +46,17 @@ export default function ReportsPage() {
         Promise.all(
           fuelBranches.map(async (branch: any) => ({
             branchId: String(branch.id),
-            payload: await apiService.getShiftReconciliations(branch.id).catch(() => []),
+            payload: await (
+              user?.role === 'org_owner'
+                ? apiService.getShiftReconciliations(branch.id)
+                : apiService.getMyShiftReconciliations(branch.id)
+            ).catch(() => []),
+          }))
+        ),
+        Promise.all(
+          fuelBranches.map(async (branch: any) => ({
+            branchId: String(branch.id),
+            payload: await apiService.getFuelExpenses(branch.id).catch(() => []),
           }))
         ),
       ])
@@ -71,8 +88,18 @@ export default function ReportsPage() {
       }))
       )
 
+      const fuelExpenses = fuelExpensesByBranch.flatMap(({ branchId, payload }) =>
+        toRecordList(payload).map((item: any) => ({
+          id: String(item.id),
+          branch_id: String(item.branch_id ?? item.branchId ?? item.branch?.id ?? branchId ?? ''),
+          amount: Number(item.amount ?? 0),
+          created_at: item.created_at ?? item.createdAt ?? new Date().toISOString(),
+        }))
+      )
+
       setGasSalesRecords(gasSales as GasTransaction[])
       setFuelShiftRecords(fuelShifts as ShiftReconciliation[])
+      setFuelExpenseRecords(fuelExpenses)
     }
     load()
   }, [])
@@ -95,30 +122,55 @@ export default function ReportsPage() {
   }, [reloadRecords])
 
   const isOrgOwner = user?.role === 'org_owner'
-  const showGas = selectedBranchType
-    ? selectedBranchType === 'gas'
-    : isOrgOwner || user?.role === 'gas_manager'
-  const showFuel = (selectedBranchType
-    ? selectedBranchType === 'fuel'
-    : isOrgOwner || user?.role === 'fuel_manager') && !isPersonalOwner
+  const showGas = isOrgOwner
+    ? true
+    : selectedBranchType
+      ? selectedBranchType === 'gas'
+      : user?.role === 'gas_manager'
+  const showFuel = (isOrgOwner
+    ? true
+    : selectedBranchType
+      ? selectedBranchType === 'fuel'
+      : user?.role === 'fuel_manager') && !isPersonalOwner
 
   const allowedBranchIds = useMemo(() => {
     if (!user) return new Set<string>()
+    if (selectedBranchId) return new Set([selectedBranchId])
     if (isOrgOwner) {
-      // Org owner report should aggregate all branches by default.
+      // Default owner view keeps all branches for shared metrics.
       return new Set(branches.map((branch: any) => String(branch.id)))
     }
-    if (selectedBranchId) return new Set([selectedBranchId])
-    return new Set(user.assigned_branches.map((id) => String(id)))
+    const firstAssignedBranchId = user.assigned_branches?.[0]
+    return firstAssignedBranchId ? new Set([String(firstAssignedBranchId)]) : new Set<string>()
   }, [user, isOrgOwner, branches, selectedBranchId])
+
+  const allowedFuelBranchIds = useMemo(() => {
+    if (!user) return new Set<string>()
+    if (selectedBranchId) {
+      const selected = branches.find((branch: any) => String(branch.id) === String(selectedBranchId))
+      if (selected && String(selected.type) === 'fuel') return new Set([String(selectedBranchId)])
+    }
+    if (isOrgOwner) {
+      const firstFuelBranch = branches.find((branch: any) => String(branch.type) === 'fuel')
+      return firstFuelBranch ? new Set([String(firstFuelBranch.id)]) : new Set<string>()
+    }
+    const firstAssignedFuelBranchId = (user.assigned_branches ?? []).find((id) =>
+      branches.some((branch: any) => String(branch.id) === String(id) && String(branch.type) === 'fuel'),
+    )
+    return firstAssignedFuelBranchId ? new Set([String(firstAssignedFuelBranchId)]) : new Set<string>()
+  }, [branches, isOrgOwner, selectedBranchId, user])
 
   const scopedGasSales = useMemo(
     () => gasSalesRecords.filter((transaction) => allowedBranchIds.has(String(transaction.branch_id))),
     [gasSalesRecords, allowedBranchIds]
   )
   const scopedFuelShifts = useMemo(
-    () => fuelShiftRecords.filter((shift) => allowedBranchIds.has(String(shift.branch_id))),
-    [fuelShiftRecords, allowedBranchIds]
+    () => fuelShiftRecords.filter((shift) => allowedFuelBranchIds.has(String(shift.branch_id))),
+    [fuelShiftRecords, allowedFuelBranchIds]
+  )
+  const scopedFuelExpenses = useMemo(
+    () => fuelExpenseRecords.filter((expense) => allowedFuelBranchIds.has(String(expense.branch_id))),
+    [fuelExpenseRecords, allowedFuelBranchIds]
   )
 
   const gasForDate = useMemo(
@@ -129,39 +181,16 @@ export default function ReportsPage() {
     () => scopedFuelShifts.filter((shift) => toDateKey(new Date(shift.created_at)) === selectedDate),
     [scopedFuelShifts, selectedDate]
   )
-
-  const latestAvailableDate = useMemo(() => {
-    const dates = [
-      ...scopedGasSales.map((transaction) => toDateKey(new Date(transaction.created_at))),
-      ...scopedFuelShifts.map((shift) => toDateKey(new Date(shift.created_at))),
-    ]
-    if (dates.length === 0) return null
-    return dates.sort((a, b) => (a < b ? 1 : -1))[0]
-  }, [scopedGasSales, scopedFuelShifts])
-
-  const availableDateKeys = useMemo(() => {
-    const keys = new Set<string>()
-    scopedGasSales.forEach((transaction) => keys.add(toDateKey(new Date(transaction.created_at))))
-    scopedFuelShifts.forEach((shift) => keys.add(toDateKey(new Date(shift.created_at))))
-    return keys
-  }, [scopedGasSales, scopedFuelShifts])
-
-  useEffect(() => {
-    if (!hasInitializedDate && latestAvailableDate) {
-      setSelectedDate(latestAvailableDate)
-      setHasInitializedDate(true)
-    }
-  }, [hasInitializedDate, latestAvailableDate])
-
-  useEffect(() => {
-    if (latestAvailableDate && availableDateKeys.size > 0 && !availableDateKeys.has(selectedDate)) {
-      setSelectedDate(latestAvailableDate)
-    }
-  }, [selectedDate, latestAvailableDate, availableDateKeys])
+  const fuelExpensesForDate = useMemo(
+    () => scopedFuelExpenses.filter((expense) => toDateKey(new Date(expense.created_at)) === selectedDate),
+    [scopedFuelExpenses, selectedDate]
+  )
 
   const gasDailySales = gasForDate.reduce((sum, transaction) => sum + transaction.amount, 0)
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
   const fuelDailySales = fuelForDate.reduce((sum, shift) => sum + shift.sales_amount, 0)
+  const fuelDailyExpenses = fuelExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
+  const fuelAfterExpenseSales = fuelDailySales - fuelDailyExpenses
   const fuelDailyVolume = fuelForDate.reduce(
     (sum, shift) => sum + Math.max(0, shift.end_reading - shift.start_reading),
     0
@@ -337,7 +366,7 @@ export default function ReportsPage() {
               />
               <MetricCard
                 label="Average Shift Sale"
-                value={formatMoney(fuelForDate.length ? fuelDailySales / fuelForDate.length : 0)}
+                value={formatMoney(fuelAfterExpenseSales)}
                 variant="default"
               />
             </div>
@@ -425,4 +454,5 @@ function buildDailySeries<T extends { created_at: string }>(
   }
   return series
 }
+
 

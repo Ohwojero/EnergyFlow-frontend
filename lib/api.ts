@@ -282,6 +282,23 @@ class ApiService {
     return this.request(`/fuel/reconciliations/${branchId}`);
   }
 
+  async getMyShiftReconciliations(branchId: string) {
+    return this.request(`/fuel/reconciliations/my/${branchId}`);
+  }
+
+  async updateShiftReconciliation(id: string, data: any) {
+    return this.request(`/fuel/reconciliations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteShiftReconciliation(id: string) {
+    return this.request(`/fuel/reconciliations/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async createFuelExpense(data: any) {
     return this.request('/fuel/expenses', {
       method: 'POST',

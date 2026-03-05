@@ -34,9 +34,12 @@ export default function DashboardPage() {
 
   const [gasSales, setGasSales] = useState(0)
   const [fuelSales, setFuelSales] = useState(0)
+  const [salesCount, setSalesCount] = useState(0)
   const [gasInventoryValue, setGasInventoryValue] = useState(0)
   const [fuelInventoryValue, setFuelInventoryValue] = useState(0)
   const [totalExpenses, setTotalExpenses] = useState(0)
+  const [gasExpenses, setGasExpenses] = useState(0)
+  const [fuelExpenses, setFuelExpenses] = useState(0)
 
   const [gasBranchRevenueMap, setGasBranchRevenueMap] = useState<Record<string, number>>({})
   const [fuelBranchRevenueMap, setFuelBranchRevenueMap] = useState<Record<string, number>>({})
@@ -90,6 +93,9 @@ export default function DashboardPage() {
 
         const totalGasSales = Object.values(gasRevenueMap).reduce((sum, v) => sum + v, 0)
         const totalFuelSales = Object.values(fuelRevenueMap).reduce((sum, v) => sum + v, 0)
+        const totalSalesCount =
+          gasSalesLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0) +
+          fuelRecLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0)
 
         const totalGasInventory = gasCylLists.flat().reduce(
           (sum: number, cyl: any) => sum + Number(cyl.quantity ?? 0) * Number(cyl.selling_price ?? 0),
@@ -110,9 +116,12 @@ export default function DashboardPage() {
 
         setGasSales(totalGasSales)
         setFuelSales(totalFuelSales)
+        setSalesCount(totalSalesCount)
         setGasInventoryValue(totalGasInventory)
         setFuelInventoryValue(totalFuelInventory)
         setTotalExpenses(gasExpensesTotal + fuelExpensesTotal)
+        setGasExpenses(gasExpensesTotal)
+        setFuelExpenses(fuelExpensesTotal)
       } finally {
         setIsLoading(false)
       }
@@ -126,8 +135,11 @@ export default function DashboardPage() {
   const totalBranches = branches.length
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
+  const netFuelSalesAfterExpenses = fuelSales - fuelExpenses
+  const netSalesAfterExpenses =
+    selectedBranchType === 'fuel' ? netFuelSalesAfterExpenses : totalSales - totalExpenses
   const totalRevenue = totalSales
-  const monthlyProfit = totalSales - totalExpenses
+  const averageSale = salesCount > 0 ? totalSales / salesCount : 0
   const monthlyGrowth = 18.5
   const formatMoneyShort = (amount: number) => {
     if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
@@ -224,8 +236,8 @@ export default function DashboardPage() {
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground mb-1">Profit/Month</p>
-                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(monthlyProfit)}</h3>
+                  <p className="text-sm text-muted-foreground mb-1">Average Sale</p>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(averageSale)}</h3>
                   <p className="text-xs text-muted-foreground mt-2">This month</p>
                 </>
               )}
@@ -363,4 +375,5 @@ export default function DashboardPage() {
     </div>
   )
 }
+
 

@@ -83,12 +83,16 @@ export default function TransactionsPage() {
           String(tx.notes ?? '').toLowerCase().includes('salesperson:sales_staff'),
         )
         const ownFuel = mappedFuel.filter((tx: any) => {
+          const creatorId = String(tx.created_by_user_id ?? '').trim()
+          const currentUserId = String(user.id ?? '').trim()
+          if (creatorId && currentUserId) return creatorId === currentUserId
+
           const staffName = String(tx.sales_staff_name ?? '').trim().toLowerCase()
           const currentName = String(user.name ?? '').trim().toLowerCase()
-          return staffName === currentName || staffName === 'sales_staff'
+          return staffName === currentName
         })
-        const filteredGas = isSalesStaff ? (ownGas.length > 0 ? ownGas : mappedGas) : mappedGas
-        const filteredFuel = isSalesStaff ? (ownFuel.length > 0 ? ownFuel : mappedFuel) : mappedFuel
+        const filteredGas = isSalesStaff ? ownGas : mappedGas
+        const filteredFuel = isSalesStaff ? ownFuel : mappedFuel
 
         setGasSales(filteredGas)
         setFuelSales(filteredFuel)
@@ -112,12 +116,16 @@ export default function TransactionsPage() {
               String(tx.notes ?? '').toLowerCase().includes('salesperson:sales_staff'),
             )
             const ownFallbackFuel = fallbackMappedFuel.filter((tx: any) => {
+              const creatorId = String(tx.created_by_user_id ?? '').trim()
+              const currentUserId = String(user.id ?? '').trim()
+              if (creatorId && currentUserId) return creatorId === currentUserId
+
               const staffName = String(tx.sales_staff_name ?? '').trim().toLowerCase()
               const currentName = String(user.name ?? '').trim().toLowerCase()
-              return staffName === currentName || staffName === 'sales_staff'
+              return staffName === currentName
             })
-            setGasSales(ownFallbackGas.length > 0 ? ownFallbackGas : fallbackMappedGas)
-            setFuelSales(ownFallbackFuel.length > 0 ? ownFallbackFuel : fallbackMappedFuel)
+            setGasSales(ownFallbackGas)
+            setFuelSales(ownFallbackFuel)
           } else {
             setGasSales(fallbackMappedGas)
             setFuelSales(fallbackMappedFuel)
@@ -174,7 +182,11 @@ export default function TransactionsPage() {
       created_at: String(s.created_at ?? new Date().toISOString()),
       branch: String((s.branch?.name ?? branchNameById.get(String(s.branch_id ?? '')) ?? fallbackBranchName) || 'Unknown Branch'),
       type: 'Fuel' as const,
-      details: `Shift ${Number(s.shift_number ?? 0)} (${String(s.pump_id ?? s.pump?.id ?? 'N/A')})`,
+      details: `Shift ${Number(s.shift_number ?? 0)} (${(() => {
+        const pumpNumber = String(s.pump_number ?? s.pump?.pump_number ?? '').trim()
+        if (pumpNumber) return /^pump\b/i.test(pumpNumber) ? pumpNumber : `Pump ${pumpNumber}`
+        return 'N/A'
+      })()})`,
       amount: Number(s.sales_amount ?? 0),
     }))
     return [...gas, ...fuel].sort(
