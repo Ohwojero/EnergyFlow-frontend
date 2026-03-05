@@ -51,7 +51,7 @@ export default function FuelSalesPage() {
   const [expenseTotal, setExpenseTotal] = useState(0)
   const [now, setNow] = useState(() => new Date())
   const [fuelPumps, setFuelPumps] = useState<Array<{ id: string; pump_number?: string }>>([])
-  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(selectedBranchId)
+  const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   const [isRecordShiftOpen, setIsRecordShiftOpen] = useState(false)

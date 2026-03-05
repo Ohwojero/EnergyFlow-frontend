@@ -100,7 +100,8 @@ export function Sidebar() {
             { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
             { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
             { label: 'Gas Sales', href: '/gas/sales', icon: ShoppingCart },
-            { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart }
+            { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
+            { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign }
           )
         } else if (hasGas) {
           items.push(
@@ -117,6 +118,7 @@ export function Sidebar() {
             { label: 'Fuel Branches', href: '/fuel/branches', icon: Fuel },
             { label: 'Inventory', href: '/fuel/inventory', icon: Package },
             { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
+            { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
             { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle }
           )
         }
@@ -147,6 +149,7 @@ export function Sidebar() {
         items.push(
           { label: 'Inventory', href: '/fuel/inventory', icon: Package },
           { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
+          { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
           { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
           { label: 'Users', href: '/users', icon: Users },
           { label: 'Reports', href: '/reports', icon: FileText },
@@ -156,6 +159,7 @@ export function Sidebar() {
       case 'sales_staff':
         items.push(
           { label: 'Sales', href: '/sales', icon: ShoppingCart },
+          { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
           { label: 'My Transactions', href: '/transactions', icon: FileText }
         )
         break

@@ -318,6 +318,22 @@ class ApiService {
     return this.request(`/fuel/analytics/${branchId}`);
   }
 
+  // Fuel Transfer APIs
+  async createFuelTransfer(data: any) {
+    return this.request('/fuel-transfer', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getFuelTransfers(branchId: string) {
+    return this.request(`/fuel-transfer/branch/${branchId}`);
+  }
+
+  async getAllFuelTransfers() {
+    return this.request('/fuel-transfer');
+  }
+
   // User APIs
   async getUsers() {
     return this.request('/user');

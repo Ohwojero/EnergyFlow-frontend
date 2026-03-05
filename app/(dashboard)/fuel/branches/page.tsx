@@ -459,7 +459,7 @@ export default function FuelBranchesPage() {
                               <span className="text-foreground">₦{Number(shift.sales_amount ?? 0).toLocaleString()}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              Pump {shift.pump_id ?? shift.pumpId ?? shift.pump?.id ?? 'N/A'}
+                              Pump {shift.pump_number ?? shift.pumpNumber ?? shift.pump?.pump_number ?? shift.pump?.number ?? 'N/A'}
                             </p>
                           </div>
                         ))}
