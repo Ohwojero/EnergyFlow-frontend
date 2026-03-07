@@ -34,6 +34,7 @@ export default function DashboardPage() {
 
   const [gasSales, setGasSales] = useState(0)
   const [fuelSales, setFuelSales] = useState(0)
+  const [fuelManagerSales, setFuelManagerSales] = useState(0)
   const [salesCount, setSalesCount] = useState(0)
   const [gasInventoryValue, setGasInventoryValue] = useState(0)
   const [fuelInventoryValue, setFuelInventoryValue] = useState(0)
@@ -85,14 +86,41 @@ export default function DashboardPage() {
         setGasBranchRevenueMap(gasRevenueMap)
 
         const fuelRevenueMap: Record<string, number> = {}
+        let totalFuelManagerSales = 0
         fuelBranches.forEach((branch: any, index: number) => {
           const list = Array.isArray(fuelRecLists[index]) ? fuelRecLists[index] : []
-          fuelRevenueMap[branch.id] = list.reduce((sum: number, tx: any) => sum + Number(tx.sales_amount ?? 0), 0)
+          console.log(`Branch ${branch.name} total shifts:`, list.length)
+          
+          // Sales staff shifts only
+          const salesStaffTotal = list
+            .filter((rec: any) => {
+              const role = String(rec?.created_by_role ?? '').trim().toLowerCase()
+              console.log(`  Shift role: ${role}, amount: ${rec.sales_amount}`)
+              return role === 'sales_staff'
+            })
+            .reduce((sum: number, tx: any) => sum + Number(tx.sales_amount ?? 0), 0)
+          console.log(`Branch ${branch.name} sales staff total:`, salesStaffTotal)
+          fuelRevenueMap[branch.id] = salesStaffTotal
+          
+          // Manager shifts only
+          const managerTotal = list
+            .filter((rec: any) => {
+              const role = String(rec?.created_by_role ?? '').trim().toLowerCase()
+              return role === 'fuel_manager' || role === 'org_owner'
+            })
+            .reduce((sum: number, tx: any) => sum + Number(tx.sales_amount ?? 0), 0)
+          console.log(`Branch ${branch.name} manager total:`, managerTotal)
+          totalFuelManagerSales += managerTotal
         })
         setFuelBranchRevenueMap(fuelRevenueMap)
 
         const totalGasSales = Object.values(gasRevenueMap).reduce((sum, v) => sum + v, 0)
         const totalFuelSales = Object.values(fuelRevenueMap).reduce((sum, v) => sum + v, 0)
+        console.log('=== DASHBOARD TOTALS ===')
+        console.log('Total Fuel Sales (sales staff only):', totalFuelSales)
+        console.log('Total Manager Sales:', totalFuelManagerSales)
+        console.log('Total Gas Sales:', totalGasSales)
+        console.log('Combined Total Sales:', totalGasSales + totalFuelSales)
         const totalSalesCount =
           gasSalesLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0) +
           fuelRecLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0)
@@ -116,6 +144,7 @@ export default function DashboardPage() {
 
         setGasSales(totalGasSales)
         setFuelSales(totalFuelSales)
+        setFuelManagerSales(totalFuelManagerSales)
         setSalesCount(totalSalesCount)
         setGasInventoryValue(totalGasInventory)
         setFuelInventoryValue(totalFuelInventory)
@@ -135,11 +164,6 @@ export default function DashboardPage() {
   const totalBranches = branches.length
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
-  const averageSaleBeforeExpense = salesCount > 0 ? totalSales / salesCount : 0
-  const averageSale = averageSaleBeforeExpense - totalExpenses
-  const netFuelSalesAfterExpenses = fuelSales - fuelExpenses
-  const netSalesAfterExpenses =
-    selectedBranchType === 'fuel' ? netFuelSalesAfterExpenses : totalSales - totalExpenses
   const totalRevenue = totalSales
   const monthlyGrowth = 18.5
   const formatMoneyShort = (amount: number) => {
@@ -178,7 +202,7 @@ export default function DashboardPage() {
                   {monthlyGrowth}%
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground mb-1">{isOwner && !isPersonalOwner ? 'Total Revenue' : 'Total Sales'}</p>
+              <p className="text-sm text-muted-foreground mb-1">{isOwner && !isPersonalOwner ? 'Total Revenue' : 'Total Sales from all Pump'}</p>
               <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? totalRevenue : totalSales)}</h3>
               <p className="text-xs text-muted-foreground mt-2">This month</p>
             </Card>
@@ -231,15 +255,15 @@ export default function DashboardPage() {
               </div>
               {isOwner && !isPersonalOwner ? (
                 <>
-                  <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
+                  <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
                   <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
                   <p className="text-xs text-muted-foreground mt-2">This month</p>
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground mb-1">Average Sale</p>
-                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(averageSale)}</h3>
-                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                  <p className="text-sm text-muted-foreground mb-1">Total Pump from Manager</p>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(fuelManagerSales)}</h3>
+                  <p className="text-xs text-muted-foreground mt-2">Manager collection</p>
                 </>
               )}
             </Card>

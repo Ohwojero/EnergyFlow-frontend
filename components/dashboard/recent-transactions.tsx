@@ -16,6 +16,7 @@ type TxItem = {
   details: string
   amount: number
   created_at: string
+  created_by_role?: string
 }
 
 export function RecentTransactions() {
@@ -72,6 +73,7 @@ export function RecentTransactions() {
           details: `Shift ${tx.shift_number ?? '-'}${tx.pump?.pump_number ? ` • Pump ${tx.pump.pump_number}` : ''}`,
           amount: Number(tx.sales_amount ?? 0),
           created_at: String(tx.created_at ?? new Date().toISOString()),
+          created_by_role: String(tx.created_by_role ?? '').trim().toLowerCase(),
         }))
 
         const merged = [...gasTx, ...fuelTx]
@@ -137,7 +139,9 @@ export function RecentTransactions() {
           {monthGroups.map(([monthKey, monthTransactions]) => {
             const date = new Date(monthKey + '-01')
             const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-            const monthTotal = monthTransactions.reduce((sum, t) => sum + t.amount, 0)
+            const salesStaffTotal = monthTransactions
+              .filter((t) => t.source === 'gas' || t.created_by_role === 'sales_staff')
+              .reduce((sum, t) => sum + t.amount, 0)
 
             return (
               <AccordionItem key={monthKey} value={monthKey} className="border-b">
@@ -145,7 +149,7 @@ export function RecentTransactions() {
                   <div className="flex items-center justify-between w-full pr-4">
                     <span className="font-semibold">{monthName}</span>
                     <span className="text-sm text-muted-foreground">
-                      {monthTransactions.length} transactions • ₦{monthTotal.toLocaleString()}
+                      {monthTransactions.length} transactions • ₦{salesStaffTotal.toLocaleString()}
                     </span>
                   </div>
                 </AccordionTrigger>

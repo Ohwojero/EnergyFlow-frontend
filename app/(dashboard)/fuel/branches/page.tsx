@@ -139,7 +139,11 @@ export default function FuelBranchesPage() {
     : 0
   const branchSalesValue = selectedBranch
     ? shiftReconciliations
-        .filter((shift) => belongsToSelectedBranch(shift))
+        .filter((shift) => {
+          if (!belongsToSelectedBranch(shift)) return false
+          const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+          return role === 'sales_staff'
+        })
         .reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
     : 0
   const branchShifts = selectedBranch
@@ -411,7 +415,7 @@ export default function FuelBranchesPage() {
       </Dialog>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Station Details</DialogTitle>
             <DialogDescription>Overview and recent activity for this station.</DialogDescription>

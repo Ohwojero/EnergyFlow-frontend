@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { DollarSign, Plus, TrendingUp } from 'lucide-react'
+import { DollarSign, Plus, TrendingUp, Pencil, Trash2 } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
@@ -40,11 +40,19 @@ export default function FuelTransferPage() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [editingTransfer, setEditingTransfer] = useState<Transfer | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [shifts, setShifts] = useState<any[]>([])
   const [expenses, setExpenses] = useState(0)
   const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
+    amount: '',
+    staff_name: '',
+  })
+  const [editFormData, setEditFormData] = useState({
     amount: '',
     staff_name: '',
   })
@@ -157,10 +165,12 @@ export default function FuelTransferPage() {
   const today = new Date()
   const todayShifts = shifts.filter((s: any) => {
     const shiftDate = new Date(s.created_at)
-    return shiftDate.toDateString() === today.toDateString()
+    const role = String(s.created_by_role ?? '').trim().toLowerCase()
+    return shiftDate.toDateString() === today.toDateString() && role === 'sales_staff'
   })
-  const totalSales = todayShifts.reduce((sum, s: any) => sum + Number(s.sales_amount || 0), 0)
-  const averageSales = todayShifts.length > 0 ? (totalSales / todayShifts.length) - expenses - totalTransfers : 0
+  const totalSalesFromPump = todayShifts.reduce((sum, s: any) => sum + Number(s.sales_amount || 0), 0)
+  const totalSalesMinusExpense = totalSalesFromPump - expenses
+  const averageSales = todayShifts.length > 0 ? (totalSalesFromPump / todayShifts.length) - expenses - totalTransfers : 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -216,6 +226,87 @@ export default function FuelTransferPage() {
     }
   }
 
+  const openEditTransfer = (transfer: Transfer) => {
+    setEditingTransfer(transfer)
+    setEditFormData({
+      amount: String(transfer.amount),
+      staff_name: transfer.staff_name,
+    })
+    setIsEditModalOpen(true)
+  }
+
+  const handleUpdateTransfer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingTransfer) return
+
+    const amount = Number(editFormData.amount)
+    
+    if (!amount || amount <= 0) {
+      toast({
+        title: 'Invalid amount',
+        description: 'Please enter a valid amount',
+      })
+      return
+    }
+
+    if (!editFormData.staff_name.trim()) {
+      toast({
+        title: 'Missing staff name',
+        description: 'Please enter staff name',
+      })
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      await apiService.updateFuelTransfer(editingTransfer.id, {
+        amount,
+        staff_name: editFormData.staff_name.trim(),
+      })
+      
+      await loadTransfers()
+      setIsEditModalOpen(false)
+      setEditingTransfer(null)
+      
+      toast({
+        title: 'Transfer updated',
+        description: 'Transfer has been updated successfully',
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to update transfer',
+        description: error instanceof Error ? error.message : 'Please try again',
+      })
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  const handleDeleteTransfer = async (transfer: Transfer) => {
+    const confirmed = typeof window !== 'undefined'
+      ? window.confirm('Delete this transfer? This action cannot be undone.')
+      : false
+    if (!confirmed) return
+
+    setDeletingId(transfer.id)
+    try {
+      await apiService.deleteFuelTransfer(transfer.id)
+      await loadTransfers()
+      
+      toast({
+        title: 'Transfer deleted',
+        description: 'Transfer has been deleted successfully',
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to delete transfer',
+        description: error instanceof Error ? error.message : 'Please try again',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-8">
@@ -253,7 +344,7 @@ export default function FuelTransferPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card">
           <div className="flex items-start justify-between mb-4">
             <div className="p-3 bg-green-600/20 rounded-lg">
@@ -265,15 +356,26 @@ export default function FuelTransferPage() {
           <p className="text-xs text-muted-foreground mt-2">Today</p>
         </Card>
 
+        <Card className="p-6 bg-purple-100 dark:bg-purple-900/20 border-0 shadow-card">
+          <div className="flex items-start justify-between mb-4">
+            <div className="p-3 bg-purple-600/20 rounded-lg">
+              <DollarSign className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground mb-1">Total Transfers - Total Sales from all Pump-Expense</p>
+          <h3 className="text-3xl font-bold text-foreground">₦{Math.abs(totalTransfers - totalSalesMinusExpense).toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <p className="text-xs text-muted-foreground mt-2">What's left</p>
+        </Card>
+
         <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card">
           <div className="flex items-start justify-between mb-4">
             <div className="p-3 bg-blue-600/20 rounded-lg">
               <TrendingUp className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Average Sales</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{averageSales.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
-          <p className="text-xs text-muted-foreground mt-2">(Total Sales ÷ Shifts) - Expenses</p>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump-Expense</p>
+          <h3 className="text-3xl font-bold text-foreground">₦{totalSalesMinusExpense.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <p className="text-xs text-muted-foreground mt-2">Sales - Expenses</p>
         </Card>
 
         <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card">
@@ -305,6 +407,7 @@ export default function FuelTransferPage() {
                   <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
                   <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Staff Name</th>
                   <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -321,6 +424,29 @@ export default function FuelTransferPage() {
                     </td>
                     <td className="px-6 py-4 text-foreground">{transfer.staff_name}</td>
                     <td className="px-6 py-4 font-semibold text-foreground">₦{Number(transfer.amount).toLocaleString()}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditTransfer(transfer)}
+                        >
+                          <Pencil className="w-4 h-4 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          disabled={deletingId === transfer.id}
+                          onClick={() => handleDeleteTransfer(transfer)}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          {deletingId === transfer.id ? 'Deleting...' : 'Delete'}
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -365,6 +491,48 @@ export default function FuelTransferPage() {
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 {isSubmitting ? 'Saving...' : 'Save Transfer'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Transfer</DialogTitle>
+            <DialogDescription>Update transfer details</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleUpdateTransfer} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_staff_name">Staff Name</Label>
+              <Input
+                id="edit_staff_name"
+                value={editFormData.staff_name}
+                onChange={(e) => setEditFormData(prev => ({ ...prev, staff_name: e.target.value }))}
+                placeholder="e.g. John Doe"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_amount">Amount (₦)</Label>
+              <Input
+                id="edit_amount"
+                type="number"
+                min="1"
+                value={editFormData.amount}
+                onChange={(e) => setEditFormData(prev => ({ ...prev, amount: e.target.value }))}
+                placeholder="e.g. 50000"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isUpdating}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isUpdating} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                {isUpdating ? 'Updating...' : 'Update Transfer'}
               </Button>
             </DialogFooter>
           </form>

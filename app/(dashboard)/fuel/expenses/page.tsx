@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/metric-card'
-import { AlertCircle, TrendingDown } from 'lucide-react'
+import { AlertCircle, TrendingDown, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -78,9 +78,18 @@ export default function FuelExpensesPage() {
   const [fuelShiftSales, setFuelShiftSales] = useState<FuelShiftSale[]>([])
 
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
+  const [isEditExpenseOpen, setIsEditExpenseOpen] = useState(false)
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     category: 'pump_maintenance',
+    amount: '',
+    description: '',
+  })
+  const [editFormData, setEditFormData] = useState({
+    category: '',
     amount: '',
     description: '',
   })
@@ -139,11 +148,7 @@ export default function FuelExpensesPage() {
         Promise.all(
           scopedFuelBranches.map(async (branch: any) => ({
             branchId: String(branch.id),
-            payload: await (
-              isOwner
-                ? apiService.getShiftReconciliations(branch.id)
-                : apiService.getMyShiftReconciliations(branch.id)
-            ).catch(() => []),
+            payload: await apiService.getShiftReconciliations(branch.id).catch(() => []),
           })),
         ),
       ])
@@ -171,11 +176,16 @@ export default function FuelExpensesPage() {
       )
       setFuelShiftSales(
         fuelShiftsByBranch.flatMap(({ branchId, payload }) =>
-          (Array.isArray(payload) ? payload : []).map((shift: any) => ({
-            branch_id: String(shift.branch_id ?? shift.branch?.id ?? branchId),
-            sales_amount: Number(shift.sales_amount ?? 0),
-            created_at: String(shift.created_at ?? shift.createdAt ?? new Date().toISOString()),
-          })),
+          (Array.isArray(payload) ? payload : [])
+            .filter((shift: any) => {
+              const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+              return role === 'sales_staff'
+            })
+            .map((shift: any) => ({
+              branch_id: String(shift.branch_id ?? shift.branch?.id ?? branchId),
+              sales_amount: Number(shift.sales_amount ?? 0),
+              created_at: String(shift.created_at ?? shift.createdAt ?? new Date().toISOString()),
+            })),
         ),
       )
     } finally {
@@ -218,7 +228,7 @@ export default function FuelExpensesPage() {
   const totalExpenses = visibleExpenses
     .filter((exp) => isSameLocalDay(exp.created_at, now))
     .reduce((sum, exp) => sum + exp.amount, 0)
-  const visibleFuelSalesTotal = (() => {
+  const totalSalesFromPump = (() => {
     if (isOwner) {
       if (!localSelectedBranchId) {
         return fuelShiftSales
@@ -239,21 +249,7 @@ export default function FuelExpensesPage() {
       .filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now))
       .reduce((sum, row) => sum + row.sales_amount, 0)
   })()
-  const visibleFuelSalesCount = (() => {
-    if (isOwner) {
-      if (!localSelectedBranchId) {
-        return fuelShiftSales.filter((row) => isSameLocalDay(row.created_at, now)).length
-      }
-      return fuelShiftSales.filter((row) => row.branch_id === localSelectedBranchId && isSameLocalDay(row.created_at, now)).length
-    }
-    const targetBranchId = activeFuelBranchId
-    if (!targetBranchId) {
-      return fuelShiftSales.filter((row) => isSameLocalDay(row.created_at, now)).length
-    }
-    return fuelShiftSales.filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now)).length
-  })()
-  const averageSale = visibleFuelSalesCount > 0 ? visibleFuelSalesTotal / visibleFuelSalesCount : 0
-  const netFuelSalesAfterExpenses = averageSale - totalExpenses
+  const expTotalSales = totalSalesFromPump - totalExpenses
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -366,6 +362,87 @@ export default function FuelExpensesPage() {
     }
   }
 
+  const openEditExpense = (expense: ExpenseItem) => {
+    setEditingExpense(expense)
+    setEditFormData({
+      category: expense.category,
+      amount: String(expense.amount),
+      description: expense.description,
+    })
+    setIsEditExpenseOpen(true)
+  }
+
+  const handleUpdateExpense = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!editingExpense) return
+
+    const amount = Number(editFormData.amount)
+    const description = editFormData.description.trim()
+
+    if (!editFormData.category || !amount || !description) {
+      toast({
+        title: 'Missing details',
+        description: 'Category, amount, and description are required.',
+      })
+      return
+    }
+
+    if (amount <= 0) {
+      toast({
+        title: 'Invalid amount',
+        description: 'Amount must be greater than zero.',
+      })
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      await apiService.updateFuelExpense(editingExpense.id, {
+        category: editFormData.category,
+        amount,
+        description,
+      })
+      await loadExpenses()
+      toast({
+        title: 'Expense updated',
+        description: 'Fuel expense has been updated successfully.',
+      })
+      setIsEditExpenseOpen(false)
+      setEditingExpense(null)
+    } catch (error) {
+      toast({
+        title: 'Update failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  const handleDeleteExpense = async (expense: ExpenseItem) => {
+    const confirmed = typeof window !== 'undefined'
+      ? window.confirm('Delete this expense? This action cannot be undone.')
+      : false
+    if (!confirmed) return
+
+    setDeletingId(expense.id)
+    try {
+      await apiService.deleteFuelExpense(expense.id)
+      await loadExpenses()
+      toast({
+        title: 'Expense deleted',
+        description: 'Fuel expense has been deleted successfully.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
       {/* Page Header */}
@@ -430,8 +507,8 @@ export default function FuelExpensesPage() {
           variant="primary"
         />
         <MetricCard
-          label="Average Sale"
-          value={`N${Math.round(averageSale - totalExpenses).toLocaleString()}`}
+          label="Total Sales from all Pump"
+          value={`N${Math.round(totalSalesFromPump).toLocaleString()}`}
           variant="secondary"
         />
         <MetricCard
@@ -485,6 +562,7 @@ export default function FuelExpensesPage() {
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -502,6 +580,29 @@ export default function FuelExpensesPage() {
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.description}</td>
                               <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openEditExpense(expense)}
+                                  >
+                                    <Pencil className="w-4 h-4 mr-1" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    disabled={deletingId === expense.id}
+                                    onClick={() => handleDeleteExpense(expense)}
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-1" />
+                                    {deletingId === expense.id ? 'Deleting...' : 'Delete'}
+                                  </Button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -579,6 +680,74 @@ export default function FuelExpensesPage() {
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 {isSubmitting ? 'Saving...' : 'Save Expense'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isEditExpenseOpen}
+        onOpenChange={(open) => {
+          setIsEditExpenseOpen(open)
+          if (!open) setEditingExpense(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Fuel Expense</DialogTitle>
+            <DialogDescription>
+              Update the expense details.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleUpdateExpense} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_category">Category</Label>
+              <select
+                id="edit_category"
+                value={editFormData.category}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="pump_maintenance">Pump Maintenance</option>
+                <option value="tank_cleaning">Tank Cleaning</option>
+                <option value="filter_replacement">Filter Replacement</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_amount">Amount</Label>
+              <Input
+                id="edit_amount"
+                type="number"
+                min="1"
+                value={editFormData.amount}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, amount: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit_description">Description</Label>
+              <Input
+                id="edit_description"
+                value={editFormData.description}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditExpenseOpen(false)}
+                disabled={isUpdating}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isUpdating} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                {isUpdating ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
           </form>

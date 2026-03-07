@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
   Dialog,
   DialogContent,
@@ -97,6 +98,16 @@ export default function UsersPage() {
     return allUsers.filter((u) => u.tenant_id === currentUser.tenant_id)
   }, [allUsers, currentUser])
 
+  const groupedUsers = useMemo(() => {
+    const groups: Record<string, User[]> = {}
+    users.forEach((user) => {
+      const role = user.role
+      if (!groups[role]) groups[role] = []
+      groups[role].push(user)
+    })
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [users])
+
   const branchNameById = useMemo(() => {
     const map = new Map<string, string>()
     tenantBranches.forEach((branch) => {
@@ -119,6 +130,23 @@ export default function UsersPage() {
         return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
       default:
         return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-400'
+    }
+  }
+
+  const getRoleHeaderBg = (role: string) => {
+    switch (role) {
+      case 'super_admin':
+        return 'bg-purple-50 dark:bg-purple-900/20'
+      case 'org_owner':
+        return 'bg-blue-50 dark:bg-blue-900/20'
+      case 'gas_manager':
+        return 'bg-green-50 dark:bg-green-900/20'
+      case 'fuel_manager':
+        return 'bg-orange-50 dark:bg-orange-900/20'
+      case 'sales_staff':
+        return 'bg-yellow-50 dark:bg-yellow-900/20'
+      default:
+        return 'bg-gray-50 dark:bg-gray-900/20'
     }
   }
 
@@ -322,73 +350,89 @@ export default function UsersPage() {
           <h3 className="text-lg font-semibold text-foreground">All Users</h3>
         </div>
 
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="px-6 py-8 text-center text-muted-foreground">Loading users...</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Name</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Email</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Role</th>
-                  {!isPersonalOwner && (
-                    <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
-                  )}
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
-                  <th className="px-6 py-3 text-right font-semibold text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-medium text-foreground">{user.name}</p>
-                    </td>
-                    <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
-                    <td className="px-6 py-4">
-                      <Badge className={getRoleBgColor(user.role)}>
-                        {user.role.replace(/_/g, ' ').toUpperCase()}
+        {isLoading ? (
+          <div className="px-6 py-8 text-center text-muted-foreground">Loading users...</div>
+        ) : users.length === 0 ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-muted-foreground">No users yet</p>
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={groupedUsers.map(([role]) => role)} className="w-full">
+            {groupedUsers.map(([role, roleUsers]) => (
+              <AccordionItem key={role} value={role} className="border-b">
+                <AccordionTrigger className={`px-6 py-4 hover:bg-muted/50 ${getRoleHeaderBg(role)}`}>
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <div className="flex items-center gap-3">
+                      <Badge className={getRoleBgColor(role)}>
+                        {role.replace(/_/g, ' ').toUpperCase()}
                       </Badge>
-                    </td>
-                    {!isPersonalOwner && (
-                      <td className="px-6 py-4 text-foreground">
-                        {user.assigned_branches.length === 0
-                          ? 'No branch assigned'
-                          : user.assigned_branches
-                              .map((id) => branchNameById.get(String(id)) ?? 'Unknown Branch')
-                              .join(', ')}
-                      </td>
-                    )}
-                    <td className="px-6 py-4">
-                      <Badge className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                        Active
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
-                          onClick={() => handleEditUser(user)}
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
-                          onClick={() => handleDeleteUser(user)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                    </div>
+                    <span className="text-sm text-muted-foreground">{roleUsers.length} users</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Name</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Email</th>
+                          {!isPersonalOwner && (
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branches</th>
+                          )}
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
+                          <th className="px-6 py-3 text-right font-semibold text-muted-foreground">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roleUsers.map((user) => (
+                          <tr key={user.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                            <td className="px-6 py-4">
+                              <p className="font-medium text-foreground">{user.name}</p>
+                            </td>
+                            <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
+                            {!isPersonalOwner && (
+                              <td className="px-6 py-4 text-foreground">
+                                {user.assigned_branches.length === 0
+                                  ? 'No branch assigned'
+                                  : user.assigned_branches
+                                      .map((id) => branchNameById.get(String(id)) ?? 'Unknown Branch')
+                                      .join(', ')}
+                              </td>
+                            )}
+                            <td className="px-6 py-4">
+                              <Badge className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                                Active
+                              </Badge>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
+                                  onClick={() => handleEditUser(user)}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
+                                  onClick={() => handleDeleteUser(user)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
       </Card>
 
       <Dialog

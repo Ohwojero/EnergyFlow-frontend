@@ -314,6 +314,19 @@ class ApiService {
     return this.request('/fuel/expenses');
   }
 
+  async updateFuelExpense(id: string, data: any) {
+    return this.request(`/fuel/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteFuelExpense(id: string) {
+    return this.request(`/fuel/expenses/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getFuelAnalytics(branchId: string) {
     return this.request(`/fuel/analytics/${branchId}`);
   }
@@ -332,6 +345,19 @@ class ApiService {
 
   async getAllFuelTransfers() {
     return this.request('/fuel-transfer');
+  }
+
+  async updateFuelTransfer(id: string, data: any) {
+    return this.request(`/fuel-transfer/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteFuelTransfer(id: string) {
+    return this.request(`/fuel-transfer/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // User APIs
@@ -371,6 +397,16 @@ class ApiService {
   async getAdminBilling(tenantId?: string) {
     const query = tenantId ? `?tenant=${tenantId}` : ''
     return this.request(`/admin/billing${query}`)
+  }
+
+  async getTenantsNeedingAttention() {
+    return this.request('/billing/tenants-needing-attention')
+  }
+
+  async recordPayment(tenantId: string) {
+    return this.request(`/billing/record-payment/${tenantId}`, {
+      method: 'POST',
+    })
   }
 }
 

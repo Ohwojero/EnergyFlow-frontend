@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { BillingNotifications } from '@/components/admin/billing-notifications'
 import { apiService } from '@/lib/api'
 import {
   Building2,
@@ -106,6 +107,11 @@ export default function TenantsPage() {
           <p className="text-red-600">{error}</p>
         </Card>
       ) : null}
+
+      {/* Billing Notifications */}
+      <div className="mb-6">
+        <BillingNotifications />
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card className="p-4 shadow-card">

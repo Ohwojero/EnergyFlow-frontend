@@ -120,7 +120,6 @@ export function Sidebar() {
               icon: Fuel,
               children: [
                 { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
-                { label: 'Transfer', href: '/fuel/transfer', icon: DollarSign },
                 { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
                 { label: 'Inventory', href: '/fuel/inventory', icon: Package },
               ]
@@ -141,7 +140,6 @@ export function Sidebar() {
             { label: 'Fuel Branches', href: '/fuel/branches', icon: Fuel },
             { label: 'Inventory', href: '/fuel/inventory', icon: Package },
             { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
-            { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
             { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle }
           )
         }

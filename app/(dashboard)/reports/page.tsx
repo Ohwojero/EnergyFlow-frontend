@@ -146,13 +146,13 @@ export default function ReportsPage() {
 
   const allowedFuelBranchIds = useMemo(() => {
     if (!user) return new Set<string>()
+    if (isOrgOwner) {
+      // For org_owner, include ALL fuel branches
+      return new Set(branches.filter((branch: any) => String(branch.type) === 'fuel').map((branch: any) => String(branch.id)))
+    }
     if (selectedBranchId) {
       const selected = branches.find((branch: any) => String(branch.id) === String(selectedBranchId))
       if (selected && String(selected.type) === 'fuel') return new Set([String(selectedBranchId)])
-    }
-    if (isOrgOwner) {
-      const firstFuelBranch = branches.find((branch: any) => String(branch.type) === 'fuel')
-      return firstFuelBranch ? new Set([String(firstFuelBranch.id)]) : new Set<string>()
     }
     const firstAssignedFuelBranchId = (user.assigned_branches ?? []).find((id) =>
       branches.some((branch: any) => String(branch.id) === String(id) && String(branch.type) === 'fuel'),
@@ -190,8 +190,7 @@ export default function ReportsPage() {
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
   const fuelDailySales = fuelForDate.reduce((sum, shift) => sum + shift.sales_amount, 0)
   const fuelDailyExpenses = fuelExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
-  const averageFuelSale = fuelForDate.length > 0 ? fuelDailySales / fuelForDate.length : 0
-  const fuelAfterExpenseSales = averageFuelSale - fuelDailyExpenses
+  const totalSalesMinusExpense = fuelDailySales - fuelDailyExpenses
   const fuelDailyVolume = fuelForDate.reduce(
     (sum, shift) => sum + Math.max(0, shift.end_reading - shift.start_reading),
     0
@@ -207,7 +206,7 @@ export default function ReportsPage() {
   )
 
   const chartConfig = {
-    sales: { label: 'Sales', color: '#2563eb' },
+    sales: { label: 'Total Sales from all Pump', color: '#2563eb' },
   }
 
   const handleExportReport = () => {
@@ -350,7 +349,7 @@ export default function ReportsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                label="Total Sales"
+                label="Total Sales from all Pump"
                 value={formatMoneyShort(fuelDailySales)}
                 icon={TrendingUp}
                 variant="accent"
@@ -366,15 +365,15 @@ export default function ReportsPage() {
                 variant="secondary"
               />
               <MetricCard
-                label="Average Shift Sale"
-                value={formatMoney(fuelAfterExpenseSales)}
+                label="Total Sales from all Pump-Expense"
+                value={formatMoney(totalSalesMinusExpense)}
                 variant="default"
               />
             </div>
           </div>
 
           <Card className="p-6 mb-8 shadow-card">
-            <h3 className="text-lg font-semibold text-foreground mb-4">Fuel Sales (Last 7 Days)</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">Total Sales from all Pump (Last 7 Days)</h3>
             <ChartContainer config={chartConfig} className="h-[280px] w-full">
               <BarChart data={fuelChartData}>
                 <CartesianGrid vertical={false} />
@@ -445,12 +444,11 @@ function buildDailySeries<T extends { created_at: string }>(
     const current = new Date(endDate)
     current.setDate(endDate.getDate() - offset)
     const dateKey = toDateKey(current)
-    const sales = records
-      .filter((record) => toDateKey(new Date(record.created_at)) === dateKey)
-      .reduce((sum, record) => sum + getAmount(record), 0)
+    const dayRecords = records.filter((record) => toDateKey(new Date(record.created_at)) === dateKey)
+    const totalSales = dayRecords.reduce((sum, record) => sum + getAmount(record), 0)
     series.push({
       date: `${current.getDate()}/${current.getMonth() + 1}`,
-      sales,
+      sales: totalSales,
     })
   }
   return series

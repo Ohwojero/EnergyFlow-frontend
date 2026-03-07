@@ -40,12 +40,14 @@ export default function FuelSalesPage() {
   const currentUserId = String((user as any)?.id ?? (user as any)?.user_id ?? '').trim()
   const currentUserRole = String(user?.role ?? '').trim().toLowerCase()
   const isOwner = user?.role === 'org_owner'
+  const isFuelManager = user?.role === 'fuel_manager'
   const canCreatePumpInline = user?.role === 'org_owner' || user?.role === 'fuel_manager'
   const canEditReconciliation =
     user?.role === 'org_owner' || user?.role === 'fuel_manager' || user?.role === 'sales_staff'
   const canDeleteReconciliation = user?.role === 'org_owner' || user?.role === 'fuel_manager'
 
   const [branches, setBranches] = useState<Branch[]>([])
+  const [branchUsers, setBranchUsers] = useState<Array<{ id: string; name: string; role: string }>>([])
   const [shifts, setShifts] = useState<ShiftEntry[]>([])
   const [myShifts, setMyShifts] = useState<ShiftEntry[]>([])
   const [expenseTotal, setExpenseTotal] = useState(0)
@@ -294,6 +296,32 @@ export default function FuelSalesPage() {
   }, [recordBranchId])
 
   useEffect(() => {
+    const loadBranchUsers = async () => {
+      if (!recordBranchId || user?.role === 'sales_staff') {
+        setBranchUsers([])
+        return
+      }
+      try {
+        const allUsers = await apiService.getUsers()
+        const userList = Array.isArray(allUsers) ? allUsers : []
+        const branchSalesStaff = userList.filter((u: any) => {
+          const role = String(u?.role ?? '').trim().toLowerCase()
+          const assignedBranches = u?.assigned_branches ?? []
+          return role === 'sales_staff' && assignedBranches.includes(recordBranchId)
+        })
+        setBranchUsers(branchSalesStaff.map((u: any) => ({
+          id: String(u.id),
+          name: String(u.name ?? 'Unknown'),
+          role: String(u.role ?? ''),
+        })))
+      } catch {
+        setBranchUsers([])
+      }
+    }
+    loadBranchUsers()
+  }, [recordBranchId, user?.role])
+
+  useEffect(() => {
     if (fuelPumps.length === 0) {
       setFormData((prev) => ({ ...prev, pump_id: '' }))
       return
@@ -332,8 +360,15 @@ export default function FuelSalesPage() {
     : litresSold * pricePerLitreValue
 
   const salesMetricShifts = useMemo(() => {
-    return isOwner ? shifts : ownShifts
-  }, [isOwner, ownShifts, shifts])
+    if (isOwner || isFuelManager) {
+      // Filter to only sales staff shifts
+      return shifts.filter((shift) => {
+        const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+        return role === 'sales_staff'
+      })
+    }
+    return myShifts
+  }, [isOwner, isFuelManager, myShifts, shifts])
   const todaySalesMetricShifts = useMemo(
     () =>
       salesMetricShifts.filter((shift) => {
@@ -343,8 +378,7 @@ export default function FuelSalesPage() {
     [now, salesMetricShifts],
   )
   const totalSales = todaySalesMetricShifts.reduce((sum, shift) => sum + shift.sales_amount, 0)
-  const averageSales = todaySalesMetricShifts.length > 0 ? totalSales / todaySalesMetricShifts.length : 0
-  const expTotalSales = averageSales - expenseTotal
+  const expTotalSales = totalSales - expenseTotal
   const pumpNumberById = useMemo(() => {
     const map = new Map<string, string>()
     fuelPumps.forEach((pump) => {
@@ -711,7 +745,7 @@ export default function FuelSalesPage() {
               8%
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
           <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">Today only</p>
         </Card>
@@ -722,7 +756,7 @@ export default function FuelSalesPage() {
               <ShoppingCart className="w-6 h-6 text-green-600 dark:text-green-400" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Exp-Total Sales</p>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump-Expense</p>
           <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(expTotalSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">Today Sales - Today Expenses</p>
         </Card>
@@ -755,7 +789,11 @@ export default function FuelSalesPage() {
             {monthGroups.map(([monthKey, monthShifts]) => {
               const date = new Date(monthKey + '-01')
               const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = monthShifts.reduce((sum, s) => sum + s.sales_amount, 0)
+              const salesStaffShifts = monthShifts.filter((shift) => {
+                const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+                return role === 'sales_staff'
+              })
+              const monthTotal = salesStaffShifts.reduce((sum, s) => sum + s.sales_amount, 0)
 
               return (
                 <AccordionItem key={monthKey} value={monthKey} className="border-b">
@@ -777,8 +815,8 @@ export default function FuelSalesPage() {
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Shift</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Pump</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Assigned Staff</th>
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Start Reading</th>
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">End Reading</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Opening Reading</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Closing Reading</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Sales Amount</th>
                             {(canEditReconciliation || canDeleteReconciliation) && (
                               <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
@@ -786,17 +824,17 @@ export default function FuelSalesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {monthShifts.map((shift) => (
-                            (() => {
-                              const createdByUserId = String(shift.created_by_user_id ?? '').trim()
-                              const isOwnShiftById = Boolean(currentUserId && createdByUserId && currentUserId === createdByUserId)
-                              const canEditThisShift =
-                                user?.role === 'sales_staff'
-                                  ? isOwnShiftById
-                                  : canEditReconciliation
-                              const canDeleteThisShift = canDeleteReconciliation
-                              return (
-                            <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                          {monthShifts.map((shift) => {
+                            const createdByUserId = String(shift.created_by_user_id ?? '').trim()
+                            const isOwnShiftById = Boolean(currentUserId && createdByUserId && currentUserId === createdByUserId)
+                            const canEditThisShift =
+                              user?.role === 'sales_staff'
+                                ? isOwnShiftById
+                                : canEditReconciliation
+                            const canDeleteThisShift = isOwner || isFuelManager
+                            
+                            return (
+                          <tr key={shift.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(shift.created_at)}</td>
                               <td className="px-6 py-4 font-medium text-foreground">
                                 {shift.branch_name ?? branches.find((b) => b.id === shift.branch_id)?.name ?? 'Unknown Branch'}
@@ -842,9 +880,8 @@ export default function FuelSalesPage() {
                                 </td>
                               )}
                             </tr>
-                              )
-                            })()
-                          ))}
+                          )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -925,14 +962,31 @@ export default function FuelSalesPage() {
 
             <div className="space-y-2">
               <Label htmlFor="sales_staff_name">Assigned Sales Staff</Label>
-              <Input
-                id="sales_staff_name"
-                value={formData.sales_staff_name}
-                onChange={(e) => setFormData((prev) => ({ ...prev, sales_staff_name: e.target.value }))}
-                placeholder={user?.role === 'sales_staff' ? (user?.name || 'Sales Staff') : 'e.g. John Doe'}
-                disabled={user?.role === 'sales_staff'}
-                className="border-2 border-border focus-visible:border-primary"
-              />
+              {user?.role === 'sales_staff' ? (
+                <Input
+                  id="sales_staff_name"
+                  value={user?.name || 'Sales Staff'}
+                  disabled
+                  className="border-2 border-border bg-muted/40"
+                />
+              ) : (
+                <Select
+                  value={formData.sales_staff_name}
+                  onValueChange={(value) => setFormData((prev) => ({ ...prev, sales_staff_name: value }))}
+                >
+                  <SelectTrigger id="sales_staff_name" className="border-2 border-border focus:border-primary">
+                    <SelectValue placeholder="Select staff" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={`Manager/${user?.name || 'Owner'}`}>Manager/{user?.name || 'Owner'}</SelectItem>
+                    {branchUsers.map((staff) => (
+                      <SelectItem key={staff.id} value={staff.name}>
+                        {staff.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1057,7 +1111,7 @@ export default function FuelSalesPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit_start_reading">Start Reading</Label>
+                <Label htmlFor="edit_start_reading">Opening Reading</Label>
                 <Input
                   id="edit_start_reading"
                   type="number"
@@ -1067,7 +1121,7 @@ export default function FuelSalesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit_end_reading">End Reading</Label>
+                <Label htmlFor="edit_end_reading">Closing Reading</Label>
                 <Input
                   id="edit_end_reading"
                   type="number"
