@@ -3,6 +3,8 @@
 import { useAuth } from '@/context/auth-context'
 import { apiService } from '@/lib/api'
 import { Card } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import { RecentTransactions } from '@/components/dashboard/recent-transactions'
 import { Building2, Wind, Fuel, Users, Package, ShoppingCart, DollarSign, ArrowUpRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -31,8 +33,10 @@ export default function DashboardPage() {
 
   const [branches, setBranches] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [businessTypeFilter, setBusinessTypeFilter] = useState<'all' | 'gas' | 'fuel'>('all')
 
   const [gasSales, setGasSales] = useState(0)
+  const [gasManagerSales, setGasManagerSales] = useState(0)
   const [fuelSales, setFuelSales] = useState(0)
   const [fuelManagerSales, setFuelManagerSales] = useState(0)
   const [salesCount, setSalesCount] = useState(0)
@@ -79,9 +83,39 @@ export default function DashboardPage() {
         ])
 
         const gasRevenueMap: Record<string, number> = {}
+        let totalGasManagerSales = 0
         gasBranches.forEach((branch: any, index: number) => {
           const list = Array.isArray(gasSalesLists[index]) ? gasSalesLists[index] : []
-          gasRevenueMap[branch.id] = list.reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
+          
+          // Parse notes to get salesperson
+          const parseSalesperson = (notes: string) => {
+            const match = String(notes ?? '').match(/salesperson:([^|]+)/)
+            return match ? match[1].trim().toLowerCase() : ''
+          }
+          
+          // Sales staff sales only
+          const salesStaffTotal = list
+            .filter((tx: any) => {
+              const salesperson = parseSalesperson(tx.notes)
+              const notes = String(tx.notes ?? '').toLowerCase()
+              // Exclude payment records
+              return !notes.includes('type:payment_record') && 
+                     (salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager'))
+            })
+            .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
+          gasRevenueMap[branch.id] = salesStaffTotal
+          
+          // Manager sales only
+          const managerTotal = list
+            .filter((tx: any) => {
+              const salesperson = parseSalesperson(tx.notes)
+              const notes = String(tx.notes ?? '').toLowerCase()
+              // Exclude payment records
+              return !notes.includes('type:payment_record') && 
+                     (salesperson.includes('manager') || salesperson === 'manager')
+            })
+            .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
+          totalGasManagerSales += managerTotal
         })
         setGasBranchRevenueMap(gasRevenueMap)
 
@@ -116,10 +150,13 @@ export default function DashboardPage() {
 
         const totalGasSales = Object.values(gasRevenueMap).reduce((sum, v) => sum + v, 0)
         const totalFuelSales = Object.values(fuelRevenueMap).reduce((sum, v) => sum + v, 0)
+        const totalManagerSales = totalGasManagerSales + totalFuelManagerSales
         console.log('=== DASHBOARD TOTALS ===')
         console.log('Total Fuel Sales (sales staff only):', totalFuelSales)
-        console.log('Total Manager Sales:', totalFuelManagerSales)
-        console.log('Total Gas Sales:', totalGasSales)
+        console.log('Total Fuel Manager Sales:', totalFuelManagerSales)
+        console.log('Total Gas Sales (sales staff only):', totalGasSales)
+        console.log('Total Gas Manager Sales:', totalGasManagerSales)
+        console.log('Total Manager Sales (fuel + gas):', totalManagerSales)
         console.log('Combined Total Sales:', totalGasSales + totalFuelSales)
         const totalSalesCount =
           gasSalesLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0) +
@@ -143,6 +180,7 @@ export default function DashboardPage() {
         )
 
         setGasSales(totalGasSales)
+        setGasManagerSales(totalGasManagerSales)
         setFuelSales(totalFuelSales)
         setFuelManagerSales(totalFuelManagerSales)
         setSalesCount(totalSalesCount)
@@ -162,6 +200,25 @@ export default function DashboardPage() {
   const gasBranches = useMemo(() => branches.filter((b) => b.type === 'gas'), [branches])
   const fuelBranches = useMemo(() => branches.filter((b) => b.type === 'fuel'), [branches])
   const totalBranches = branches.length
+  
+  // Apply business type filter
+  const filteredTotalSales = useMemo(() => {
+    if (businessTypeFilter === 'gas') return gasSales
+    if (businessTypeFilter === 'fuel') return fuelSales
+    return gasSales + fuelSales
+  }, [businessTypeFilter, gasSales, fuelSales])
+  
+  const filteredInventory = useMemo(() => {
+    if (businessTypeFilter === 'gas') return gasInventoryValue
+    if (businessTypeFilter === 'fuel') return fuelInventoryValue
+    return gasInventoryValue + fuelInventoryValue
+  }, [businessTypeFilter, gasInventoryValue, fuelInventoryValue])
+  
+  const filteredExpenses = useMemo(() => {
+    if (businessTypeFilter === 'gas') return gasExpenses
+    if (businessTypeFilter === 'fuel') return fuelExpenses
+    return gasExpenses + fuelExpenses
+  }, [businessTypeFilter, gasExpenses, fuelExpenses])
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
   const totalRevenue = totalSales
@@ -176,10 +233,29 @@ export default function DashboardPage() {
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
       {!hideDashboardHeaderForFuelSalesStaff && (
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
-          <p className="text-muted-foreground">
-            Welcome back! Here's your business performance at a glance.
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard Overview</h1>
+              <p className="text-muted-foreground">
+                Welcome back! Here's your business performance at a glance.
+              </p>
+            </div>
+            {isOwner && !isPersonalOwner && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <Label className="font-semibold text-foreground text-sm sm:min-w-fit">Filter by:</Label>
+                <Select value={businessTypeFilter} onValueChange={(value: 'all' | 'gas' | 'fuel') => setBusinessTypeFilter(value)}>
+                  <SelectTrigger className={`w-full sm:w-40 ${businessTypeFilter === 'all' ? 'border-2 border-primary' : ''}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Business</SelectItem>
+                    <SelectItem value="gas">Gas Only</SelectItem>
+                    <SelectItem value="fuel">Fuel Only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -203,7 +279,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-sm text-muted-foreground mb-1">{isOwner && !isPersonalOwner ? 'Total Revenue' : 'Total Sales from all Pump'}</p>
-              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? totalRevenue : totalSales)}</h3>
+              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? filteredTotalSales : totalSales)}</h3>
               <p className="text-xs text-muted-foreground mt-2">This month</p>
             </Card>
 
@@ -218,7 +294,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-sm text-muted-foreground mb-1">Inventory Value</p>
-              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalInventory)}</h3>
+              <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? filteredInventory : totalInventory)}</h3>
               <p className="text-xs text-muted-foreground mt-2">Current stock</p>
             </Card>
 
@@ -256,13 +332,13 @@ export default function DashboardPage() {
               {isOwner && !isPersonalOwner ? (
                 <>
                   <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
-                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? filteredTotalSales : totalSales)}</h3>
                   <p className="text-xs text-muted-foreground mt-2">This month</p>
                 </>
               ) : (
                 <>
                   <p className="text-sm text-muted-foreground mb-1">Total Pump from Manager</p>
-                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(fuelManagerSales)}</h3>
+                  <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(fuelManagerSales + gasManagerSales)}</h3>
                   <p className="text-xs text-muted-foreground mt-2">Manager collection</p>
                 </>
               )}

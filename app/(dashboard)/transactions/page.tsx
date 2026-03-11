@@ -67,8 +67,12 @@ export default function TransactionsPage() {
         const fuelBranches = scopedBranches.filter((b: any) => b.type === 'fuel')
 
         const [gasLists, fuelLists] = await Promise.all([
-          Promise.all(gasBranches.map((b: any) => apiService.getGasSales(b.id).catch(() => []))),
-          Promise.all(fuelBranches.map((b: any) => apiService.getShiftReconciliations(b.id).catch(() => []))),
+          Promise.all(gasBranches.map((b: any) => 
+            isSalesStaff ? apiService.getMyGasSales(b.id).catch(() => []) : apiService.getGasSales(b.id).catch(() => [])
+          )),
+          Promise.all(fuelBranches.map((b: any) => 
+            isSalesStaff ? apiService.getMyShiftReconciliations(b.id).catch(() => []) : apiService.getShiftReconciliations(b.id).catch(() => [])
+          )),
         ])
 
         const mappedGas = gasLists.flat().map((tx: any) => ({
@@ -79,29 +83,19 @@ export default function TransactionsPage() {
           ...tx,
           branch_id: tx.branch_id ?? tx.branch?.id ?? '',
         }))
-        const ownGas = mappedGas.filter((tx: any) =>
-          String(tx.notes ?? '').toLowerCase().includes('salesperson:sales_staff'),
-        )
-        const ownFuel = mappedFuel.filter((tx: any) => {
-          const creatorId = String(tx.created_by_user_id ?? '').trim()
-          const currentUserId = String(user.id ?? '').trim()
-          if (creatorId && currentUserId) return creatorId === currentUserId
-
-          const staffName = String(tx.sales_staff_name ?? '').trim().toLowerCase()
-          const currentName = String(user.name ?? '').trim().toLowerCase()
-          return staffName === currentName
-        })
-        const filteredGas = isSalesStaff ? ownGas : mappedGas
-        const filteredFuel = isSalesStaff ? ownFuel : mappedFuel
-
-        setGasSales(filteredGas)
-        setFuelSales(filteredFuel)
+        
+        setGasSales(mappedGas)
+        setFuelSales(mappedFuel)
 
         if (mappedGas.length === 0 && mappedFuel.length === 0 && user.assigned_branches?.length) {
           const fallbackIds = user.assigned_branches
           const [fallbackGas, fallbackFuel] = await Promise.all([
-            Promise.all(fallbackIds.map((id) => apiService.getGasSales(id).catch(() => []))),
-            Promise.all(fallbackIds.map((id) => apiService.getShiftReconciliations(id).catch(() => []))),
+            Promise.all(fallbackIds.map((id) => 
+              isSalesStaff ? apiService.getMyGasSales(id).catch(() => []) : apiService.getGasSales(id).catch(() => [])
+            )),
+            Promise.all(fallbackIds.map((id) => 
+              isSalesStaff ? apiService.getMyShiftReconciliations(id).catch(() => []) : apiService.getShiftReconciliations(id).catch(() => [])
+            )),
           ])
           const fallbackMappedGas = fallbackGas.flat().map((tx: any) => ({
             ...tx,
@@ -111,25 +105,9 @@ export default function TransactionsPage() {
             ...tx,
             branch_id: tx.branch_id ?? tx.branch?.id ?? '',
           }))
-          if (isSalesStaff) {
-            const ownFallbackGas = fallbackMappedGas.filter((tx: any) =>
-              String(tx.notes ?? '').toLowerCase().includes('salesperson:sales_staff'),
-            )
-            const ownFallbackFuel = fallbackMappedFuel.filter((tx: any) => {
-              const creatorId = String(tx.created_by_user_id ?? '').trim()
-              const currentUserId = String(user.id ?? '').trim()
-              if (creatorId && currentUserId) return creatorId === currentUserId
-
-              const staffName = String(tx.sales_staff_name ?? '').trim().toLowerCase()
-              const currentName = String(user.name ?? '').trim().toLowerCase()
-              return staffName === currentName
-            })
-            setGasSales(ownFallbackGas)
-            setFuelSales(ownFallbackFuel)
-          } else {
-            setGasSales(fallbackMappedGas)
-            setFuelSales(fallbackMappedFuel)
-          }
+          
+          setGasSales(fallbackMappedGas)
+          setFuelSales(fallbackMappedFuel)
         }
 
         if (user.role !== 'org_owner' && selectedBranchType) {

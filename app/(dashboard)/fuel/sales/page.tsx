@@ -403,19 +403,19 @@ export default function FuelSalesPage() {
       minute: '2-digit',
     })
 
-  const groupByMonth = (entries: ShiftEntry[]) => {
+  const groupByDay = (entries: ShiftEntry[]) => {
     const groups: Record<string, ShiftEntry[]> = {}
     entries.forEach((entry) => {
       const date = new Date(entry.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
       if (!groups[key]) groups[key] = []
       groups[key].push(entry)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(shifts)
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const dayGroups = groupByDay(shifts)
+  const currentDay = new Date().toISOString().slice(0, 10)
 
   const resetForm = () => {
     setNewPumpNumber('')
@@ -546,6 +546,7 @@ export default function FuelSalesPage() {
         sales_amount: Number(salesAmount.toFixed(2)),
         variance: 0,
         sales_staff_name: assignedStaffName,
+        created_at: new Date(`${dateValue}T${timeValue}:00`).toISOString(),
       })
 
       const nextShift = normalizeShift(created, branchId)
@@ -554,7 +555,6 @@ export default function FuelSalesPage() {
       nextShift.created_by_user_id = currentUserId || nextShift.created_by_user_id
       nextShift.created_by_role = currentUserRole || nextShift.created_by_role
       nextShift.pump_number = fuelPumps.find((pump) => pump.id === pumpId)?.pump_number
-      nextShift.created_at = new Date(`${dateValue}T${timeValue}:00`).toISOString()
 
       setShifts((prev) => [nextShift, ...prev])
       if (!isOwner && nextShift.created_by_user_id && nextShift.created_by_user_id === currentUserId) {
@@ -785,23 +785,23 @@ export default function FuelSalesPage() {
             <p className="text-muted-foreground">No shift records yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-            {monthGroups.map(([monthKey, monthShifts]) => {
-              const date = new Date(monthKey + '-01')
-              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const salesStaffShifts = monthShifts.filter((shift) => {
+          <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
+            {dayGroups.map(([dayKey, dayShifts]) => {
+              const date = new Date(dayKey + 'T00:00:00')
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const salesStaffShifts = dayShifts.filter((shift) => {
                 const role = String(shift.created_by_role ?? '').trim().toLowerCase()
                 return role === 'sales_staff'
               })
-              const monthTotal = salesStaffShifts.reduce((sum, s) => sum + s.sales_amount, 0)
+              const dayTotal = salesStaffShifts.reduce((sum, s) => sum + s.sales_amount, 0)
 
               return (
-                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionItem key={dayKey} value={dayKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
-                      <span className="font-semibold">{monthName}</span>
+                      <span className="font-semibold">{dayName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthShifts.length} shifts • N{monthTotal.toLocaleString()}
+                        {dayShifts.length} shifts • N{dayTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -824,7 +824,7 @@ export default function FuelSalesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {monthShifts.map((shift) => {
+                          {dayShifts.map((shift) => {
                             const createdByUserId = String(shift.created_by_user_id ?? '').trim()
                             const isOwnShiftById = Boolean(currentUserId && createdByUserId && currentUserId === createdByUserId)
                             const canEditThisShift =

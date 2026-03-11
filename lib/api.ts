@@ -174,6 +174,10 @@ class ApiService {
     });
   }
 
+  async getBranchUsers(branchId: string) {
+    return this.request(`/branch/${branchId}/users`);
+  }
+
   // Gas APIs
   async getGasBranches() {
     return this.request('/gas/branches');
@@ -199,6 +203,10 @@ class ApiService {
 
   async getGasSales(branchId: string) {
     return this.request(`/gas/sales/${branchId}`);
+  }
+
+  async getMyGasSales(branchId: string) {
+    return this.request(`/gas/sales/my/${branchId}`);
   }
 
   async updateGasSale(id: string, data: any) {
@@ -280,6 +288,10 @@ class ApiService {
 
   async getShiftReconciliations(branchId: string) {
     return this.request(`/fuel/reconciliations/${branchId}`);
+  }
+
+  async getMyShiftReconciliations(branchId: string) {
+    return this.request(`/fuel/reconciliations/my/${branchId}`);
   }
 
   async getMyShiftReconciliations(branchId: string) {

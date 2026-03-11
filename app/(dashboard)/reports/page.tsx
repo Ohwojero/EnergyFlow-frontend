@@ -24,6 +24,7 @@ export default function ReportsPage() {
   const [gasSalesRecords, setGasSalesRecords] = useState<GasTransaction[]>([])
   const [fuelShiftRecords, setFuelShiftRecords] = useState<ShiftReconciliation[]>([])
   const [fuelExpenseRecords, setFuelExpenseRecords] = useState<FuelExpenseRecord[]>([])
+  const [gasExpenseRecords, setGasExpenseRecords] = useState<FuelExpenseRecord[]>([])
   const [branches, setBranches] = useState<any[]>([])
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
 
@@ -36,7 +37,7 @@ export default function ReportsPage() {
       const gasBranches = branchList.filter((branch: any) => branch.type === 'gas')
       const fuelBranches = branchList.filter((branch: any) => branch.type === 'fuel')
 
-      const [gasSalesByBranch, fuelShiftsByBranch, fuelExpensesByBranch] = await Promise.all([
+      const [gasSalesByBranch, fuelShiftsByBranch, fuelExpensesByBranch, gasExpensesByBranch] = await Promise.all([
         Promise.all(
           gasBranches.map(async (branch: any) => ({
             branchId: String(branch.id),
@@ -57,6 +58,12 @@ export default function ReportsPage() {
           fuelBranches.map(async (branch: any) => ({
             branchId: String(branch.id),
             payload: await apiService.getFuelExpenses(branch.id).catch(() => []),
+          }))
+        ),
+        Promise.all(
+          gasBranches.map(async (branch: any) => ({
+            branchId: String(branch.id),
+            payload: await apiService.getGasExpenses(branch.id).catch(() => []),
           }))
         ),
       ])
@@ -97,9 +104,19 @@ export default function ReportsPage() {
         }))
       )
 
+      const gasExpenses = gasExpensesByBranch.flatMap(({ branchId, payload }) =>
+        toRecordList(payload).map((item: any) => ({
+          id: String(item.id),
+          branch_id: String(item.branch_id ?? item.branchId ?? item.branch?.id ?? branchId ?? ''),
+          amount: Number(item.amount ?? 0),
+          created_at: item.created_at ?? item.createdAt ?? new Date().toISOString(),
+        }))
+      )
+
       setGasSalesRecords(gasSales as GasTransaction[])
       setFuelShiftRecords(fuelShifts as ShiftReconciliation[])
       setFuelExpenseRecords(fuelExpenses)
+      setGasExpenseRecords(gasExpenses)
     }
     load()
   }, [])
@@ -164,6 +181,10 @@ export default function ReportsPage() {
     () => gasSalesRecords.filter((transaction) => allowedBranchIds.has(String(transaction.branch_id))),
     [gasSalesRecords, allowedBranchIds]
   )
+  const scopedGasExpenses = useMemo(
+    () => gasExpenseRecords.filter((expense) => allowedBranchIds.has(String(expense.branch_id))),
+    [gasExpenseRecords, allowedBranchIds]
+  )
   const scopedFuelShifts = useMemo(
     () => fuelShiftRecords.filter((shift) => allowedFuelBranchIds.has(String(shift.branch_id))),
     [fuelShiftRecords, allowedFuelBranchIds]
@@ -174,8 +195,18 @@ export default function ReportsPage() {
   )
 
   const gasForDate = useMemo(
-    () => scopedGasSales.filter((transaction) => toDateKey(new Date(transaction.created_at)) === selectedDate),
+    () => scopedGasSales.filter((transaction) => {
+      if (toDateKey(new Date(transaction.created_at)) !== selectedDate) return false
+      // Filter only sales_staff sales
+      const salespersonMatch = String(transaction.notes ?? '').match(/salesperson:([^|]+)/)
+      const salesperson = salespersonMatch ? salespersonMatch[1].trim().toLowerCase() : ''
+      return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
+    }),
     [scopedGasSales, selectedDate]
+  )
+  const gasExpensesForDate = useMemo(
+    () => scopedGasExpenses.filter((expense) => toDateKey(new Date(expense.created_at)) === selectedDate),
+    [scopedGasExpenses, selectedDate]
   )
   const fuelForDate = useMemo(
     () => scopedFuelShifts.filter((shift) => toDateKey(new Date(shift.created_at)) === selectedDate),
@@ -188,6 +219,8 @@ export default function ReportsPage() {
 
   const gasDailySales = gasForDate.reduce((sum, transaction) => sum + transaction.amount, 0)
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
+  const gasDailyExpenses = gasExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
+  const gasSalesMinusExpense = gasDailySales - gasDailyExpenses
   const fuelDailySales = fuelForDate.reduce((sum, shift) => sum + shift.sales_amount, 0)
   const fuelDailyExpenses = fuelExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
   const totalSalesMinusExpense = fuelDailySales - fuelDailyExpenses
@@ -196,10 +229,28 @@ export default function ReportsPage() {
     0
   )
 
-  const gasChartData = useMemo(
-    () => buildDailySeries(scopedGasSales, (record) => record.amount, selectedDate),
-    [scopedGasSales, selectedDate]
-  )
+  const gasChartData = useMemo(() => {
+    const endDate = new Date(`${selectedDate}T00:00:00`)
+    const series: Array<{ date: string; sales: number }> = []
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const current = new Date(endDate)
+      current.setDate(endDate.getDate() - offset)
+      const dateKey = toDateKey(current)
+      const dayRecords = scopedGasSales.filter((record) => {
+        if (toDateKey(new Date(record.created_at)) !== dateKey) return false
+        // Filter only sales_staff sales
+        const salespersonMatch = String(record.notes ?? '').match(/salesperson:([^|]+)/)
+        const salesperson = salespersonMatch ? salespersonMatch[1].trim().toLowerCase() : ''
+        return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
+      })
+      const totalSales = dayRecords.reduce((sum, record) => sum + record.amount, 0)
+      series.push({
+        date: `${current.getDate()}/${current.getMonth() + 1}`,
+        sales: totalSales,
+      })
+    }
+    return series
+  }, [scopedGasSales, selectedDate])
   const fuelChartData = useMemo(
     () => buildDailySeries(scopedFuelShifts, (record) => record.sales_amount, selectedDate),
     [scopedFuelShifts, selectedDate]
@@ -301,7 +352,7 @@ export default function ReportsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                label="Total Sales"
+                label="Total Sales from all Pump"
                 value={formatMoneyShort(gasDailySales)}
                 icon={TrendingUp}
                 variant="secondary"
@@ -317,8 +368,8 @@ export default function ReportsPage() {
                 variant="primary"
               />
               <MetricCard
-                label="Average Sale"
-                value={formatMoney(gasForDate.length ? gasDailySales / gasForDate.length : 0)}
+                label="Total Sales from all Pump-Expense"
+                value={formatMoney(gasSalesMinusExpense)}
                 variant="default"
               />
             </div>

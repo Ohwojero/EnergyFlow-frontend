@@ -197,22 +197,20 @@ export default function FuelExpensesPage() {
     loadExpenses()
   }, [user?.id, selectedBranchId, selectedBranchType, isOwner])
 
-  const expenses = fuelExpenses
-
   const visibleExpenses = (() => {
-    const source = expenses
     if (isOwner) {
       if (!localSelectedBranchId) {
-        return source
+        return fuelExpenses
       }
-      return source.filter((e) => e.branch_id === localSelectedBranchId)
+      return fuelExpenses.filter((e) => e.branch_id === localSelectedBranchId)
     } else {
       const targetBranchId = activeFuelBranchId
-      if (!targetBranchId) return source
-      const filtered = source.filter((e) => e.branch_id === targetBranchId)
-      return filtered
+      if (!targetBranchId) return fuelExpenses
+      return fuelExpenses.filter((e) => e.branch_id === targetBranchId)
     }
   })()
+
+  const currentBranchType = 'fuel'
 
   const isSameLocalDay = (value: string | Date, today: Date) => {
     const date = new Date(value)
@@ -276,19 +274,19 @@ export default function FuelExpensesPage() {
     })
   }
 
-  const groupByMonth = <T extends { created_at: string }>(expenses: T[]) => {
+  const groupByDay = <T extends { created_at: string }>(expenses: T[]) => {
     const groups: Record<string, T[]> = {}
     expenses.forEach((e) => {
       const date = new Date(e.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = date.toISOString().slice(0, 10)
       if (!groups[key]) groups[key] = []
       groups[key].push(e)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(visibleExpenses)
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const dayGroups = groupByDay(visibleExpenses)
+  const currentDay = new Date().toISOString().slice(0, 10)
 
   const resetForm = () => {
     setFormData({
@@ -480,7 +478,7 @@ export default function FuelExpensesPage() {
                   <SelectValue placeholder="All branches" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
+                  <SelectItem value="all">All Fuel Branches</SelectItem>
                   {fuelBranches
                     .map((branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
@@ -506,11 +504,13 @@ export default function FuelExpensesPage() {
           icon={TrendingDown}
           variant="primary"
         />
-        <MetricCard
-          label="Total Sales from all Pump"
-          value={`N${Math.round(totalSalesFromPump).toLocaleString()}`}
-          variant="secondary"
-        />
+        {currentBranchType !== 'all' && (
+          <MetricCard
+            label="Total Sales from all Pump"
+            value={`₦${Math.round(totalSalesFromPump).toLocaleString()}`}
+            variant="secondary"
+          />
+        )}
         <MetricCard
           label="Expense Count"
           value={visibleExpenses.length}
@@ -528,24 +528,24 @@ export default function FuelExpensesPage() {
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">Loading expenses...</p>
           </div>
-        ) : expenses.length === 0 ? (
+        ) : visibleExpenses.length === 0 ? (
           <div className="px-6 py-8 text-center">
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-            {monthGroups.map(([monthKey, monthExpenses]) => {
-              const date = new Date(monthKey + '-01')
-              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0)
+          <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
+            {dayGroups.map(([dayKey, dayExpenses]) => {
+              const date = new Date(dayKey)
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayTotal = dayExpenses.reduce((sum, e) => sum + e.amount, 0)
               
               return (
-                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionItem key={dayKey} value={dayKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
-                      <span className="font-semibold">{monthName}</span>
+                      <span className="font-semibold">{dayName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthExpenses.length} expenses • ₦{monthTotal.toLocaleString()}
+                        {dayExpenses.length} expenses • ₦{dayTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -554,11 +554,8 @@ export default function FuelExpensesPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Time</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
-                            {isOwner && (
-                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Type</th>
-                            )}
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
@@ -566,13 +563,15 @@ export default function FuelExpensesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {monthExpenses.map((expense) => (
+                          {dayExpenses.map((expense) => (
                             <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                              <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">
+                                {new Date(expense.created_at).toLocaleTimeString('en-NG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </td>
                               <td className="px-6 py-4 text-foreground">{expense.branch_name}</td>
-                              {isOwner && (
-                                <td className="px-6 py-4 text-foreground capitalize">{expense._type}</td>
-                              )}
                               <td className="px-6 py-4">
                                 <Badge className={getCategoryColor(expense.category)}>
                                   {getCategoryLabel(expense.category)}

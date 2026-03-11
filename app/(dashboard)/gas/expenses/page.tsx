@@ -37,6 +37,7 @@ export default function GasExpensesPage() {
   const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
   const [gasBranches, setGasBranches] = useState<any[]>([])
   const [expenses, setExpenses] = useState<ExpenseItem[]>([])
+  const [salesTransactions, setSalesTransactions] = useState<any[]>([])
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -117,6 +118,14 @@ export default function GasExpensesPage() {
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
       setExpenses(mapped)
+
+      // Load gas sales
+      const salesPromises = scopedGasBranches.map((branch: any) =>
+        apiService.getGasSales(branch.id).catch(() => [])
+      )
+      const salesResults = await Promise.all(salesPromises)
+      const allSales = salesResults.flat()
+      setSalesTransactions(toList(allSales))
     } finally {
       setIsLoading(false)
     }
@@ -137,22 +146,62 @@ export default function GasExpensesPage() {
     return expenses.filter((expense) => expense.branch_id === targetBranchId)
   }, [expenses, isOwner, activeBranchId, selectedBranchId, user?.assigned_branches])
 
-  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
-  const avgExpense = visibleExpenses.length > 0 ? totalExpenses / visibleExpenses.length : 0
+  const visibleSales = useMemo(() => {
+    if (isOwner && !activeBranchId) return salesTransactions
+    const targetBranchId =
+      (isOwner ? activeBranchId : selectedBranchId) ||
+      user?.assigned_branches?.[0] ||
+      activeBranchId ||
+      ''
+    if (!targetBranchId) return salesTransactions
+    return salesTransactions.filter((sale: any) => {
+      const branchId = String(sale.branch?.id ?? sale.branch_id ?? '')
+      return branchId === targetBranchId
+    })
+  }, [salesTransactions, isOwner, activeBranchId, selectedBranchId, user?.assigned_branches])
 
-  const groupByMonth = (items: ExpenseItem[]) => {
+  const parseSalesperson = (notes: string) => {
+    const match = String(notes ?? '').match(/salesperson:([^|]+)/)
+    return match ? match[1].trim().toLowerCase() : ''
+  }
+
+  const salesStaffSales = visibleSales.filter((sale: any) => {
+    const salesperson = parseSalesperson(sale.notes)
+    return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
+  })
+
+  const isSameLocalDay = (value: string | Date, today: Date) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return false
+    return (
+      date.getFullYear() === today.getFullYear() &&
+      date.getMonth() === today.getMonth() &&
+      date.getDate() === today.getDate()
+    )
+  }
+
+  const now = new Date()
+  const totalExpenses = visibleExpenses
+    .filter((exp) => isSameLocalDay(exp.created_at, now))
+    .reduce((sum, exp) => sum + exp.amount, 0)
+  const totalSales = salesStaffSales
+    .filter((sale: any) => isSameLocalDay(sale.created_at, now))
+    .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
+  const totalSalesMinusExpense = totalSales - totalExpenses
+
+  const groupByDay = (items: ExpenseItem[]) => {
     const groups: Record<string, ExpenseItem[]> = {}
     items.forEach((item) => {
       const date = new Date(item.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = date.toISOString().slice(0, 10)
       if (!groups[key]) groups[key] = []
       groups[key].push(item)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(visibleExpenses)
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const dayGroups = groupByDay(visibleExpenses)
+  const currentDay = new Date().toISOString().slice(0, 10)
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -271,9 +320,27 @@ export default function GasExpensesPage() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <MetricCard label="Total Expenses" value={`N${(totalExpenses / 1000).toFixed(0)}K`} icon={TrendingDown} variant="primary" />
-        <MetricCard label="Average Expense" value={`N${(avgExpense / 1000).toFixed(0)}K`} variant="secondary" />
-        <MetricCard label="Expense Count" value={visibleExpenses.length} variant="accent" />
+        <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+          <div className="p-3 bg-blue-600/20 rounded-lg w-fit mb-4">
+            <TrendingDown className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          </div>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
+          <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000).toFixed(0)}K</h3>
+        </Card>
+        <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+          <div className="p-3 bg-orange-600/20 rounded-lg w-fit mb-4">
+            <TrendingDown className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+          </div>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump-Expense</p>
+          <h3 className="text-3xl font-bold text-foreground">₦{(totalSalesMinusExpense / 1000).toFixed(0)}K</h3>
+        </Card>
+        <Card className="p-6 bg-purple-100 dark:bg-purple-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+          <div className="p-3 bg-purple-600/20 rounded-lg w-fit mb-4">
+            <AlertCircle className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+          </div>
+          <p className="text-sm text-muted-foreground mb-1">Expense Count</p>
+          <h3 className="text-3xl font-bold text-foreground">{visibleExpenses.length}</h3>
+        </Card>
       </div>
 
       <Card className="shadow-card">
@@ -290,19 +357,19 @@ export default function GasExpensesPage() {
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-            {monthGroups.map(([monthKey, monthExpenses]) => {
-              const date = new Date(monthKey + '-01')
-              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+          <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
+            {dayGroups.map(([dayKey, dayExpenses]) => {
+              const date = new Date(dayKey)
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayTotal = dayExpenses.reduce((sum, expense) => sum + expense.amount, 0)
 
               return (
-                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionItem key={dayKey} value={dayKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
-                      <span className="font-semibold">{monthName}</span>
+                      <span className="font-semibold">{dayName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthExpenses.length} expenses • N{monthTotal.toLocaleString()}
+                        {dayExpenses.length} expenses • ₦{dayTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -311,7 +378,7 @@ export default function GasExpensesPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Time</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
@@ -319,15 +386,20 @@ export default function GasExpensesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {monthExpenses.map((expense) => (
+                          {dayExpenses.map((expense) => (
                             <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                              <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">
+                                {new Date(expense.created_at).toLocaleTimeString('en-NG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </td>
                               <td className="px-6 py-4 text-foreground">{expense.branch_name || '-'}</td>
                               <td className="px-6 py-4">
                                 <Badge className={getCategoryColor(expense.category)}>{getCategoryLabel(expense.category)}</Badge>
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.description}</td>
-                              <td className="px-6 py-4 font-semibold text-foreground">N{expense.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
                             </tr>
                           ))}
                         </tbody>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DollarSign, Plus, TrendingUp, Pencil, Trash2 } from 'lucide-react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
@@ -400,58 +401,86 @@ export default function FuelTransferPage() {
             <p className="text-muted-foreground">No transfers recorded yet</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Staff Name</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transfers.map((transfer) => (
-                  <tr key={transfer.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4 text-foreground">
-                      {new Date(transfer.created_at).toLocaleDateString('en-NG', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </td>
-                    <td className="px-6 py-4 text-foreground">{transfer.staff_name}</td>
-                    <td className="px-6 py-4 font-semibold text-foreground">₦{Number(transfer.amount).toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditTransfer(transfer)}
-                        >
-                          <Pencil className="w-4 h-4 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          disabled={deletingId === transfer.id}
-                          onClick={() => handleDeleteTransfer(transfer)}
-                        >
-                          <Trash2 className="w-4 h-4 mr-1" />
-                          {deletingId === transfer.id ? 'Deleting...' : 'Delete'}
-                        </Button>
+          <Accordion type="multiple" defaultValue={[new Date().toISOString().slice(0, 10)]} className="w-full">
+            {(() => {
+              const groups: Record<string, Transfer[]> = {}
+              transfers.forEach((t) => {
+                const date = new Date(t.created_at)
+                const key = date.toISOString().slice(0, 10)
+                if (!groups[key]) groups[key] = []
+                groups[key].push(t)
+              })
+              return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0])).map(([dayKey, dayTransfers]) => {
+                const date = new Date(dayKey)
+                const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                const dayTotal = dayTransfers.reduce((sum, t) => sum + Number(t.amount), 0)
+                
+                return (
+                  <AccordionItem key={dayKey} value={dayKey} className="border-b">
+                    <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <span className="font-semibold">{dayName}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {dayTransfers.length} transfers • ₦{dayTotal.toLocaleString()}
+                        </span>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border bg-muted/50">
+                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Time</th>
+                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Staff Name</th>
+                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                              <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayTransfers.map((transfer) => (
+                              <tr key={transfer.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                                <td className="px-6 py-4 text-foreground">
+                                  {new Date(transfer.created_at).toLocaleTimeString('en-NG', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </td>
+                                <td className="px-6 py-4 text-foreground">{transfer.staff_name}</td>
+                                <td className="px-6 py-4 font-semibold text-foreground">₦{Number(transfer.amount).toLocaleString()}</td>
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openEditTransfer(transfer)}
+                                    >
+                                      <Pencil className="w-4 h-4 mr-1" />
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="destructive"
+                                      size="sm"
+                                      disabled={deletingId === transfer.id}
+                                      onClick={() => handleDeleteTransfer(transfer)}
+                                    >
+                                      <Trash2 className="w-4 h-4 mr-1" />
+                                      {deletingId === transfer.id ? 'Deleting...' : 'Delete'}
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              })
+            })()}
+          </Accordion>
         )}
       </Card>
 

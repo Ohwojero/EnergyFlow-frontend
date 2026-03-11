@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { apiService } from '@/lib/api'
+import { formatRoleName } from '@/lib/utils/role-formatter'
 import {
   LayoutDashboard,
   Fuel,
@@ -16,15 +17,12 @@ import {
   Building2,
   LogOut,
   DollarSign,
-  Activity,
-  BarChart3,
-  TrendingUp,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
 
 export function Sidebar() {
-  const { user, logout, selectedBranchId } = useAuth()
+  const { user, logout, selectedBranchId, selectedBranchType } = useAuth()
   const [branches, setBranches] = useState<any[]>([])
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({})
   const sidebarTitle = user?.tenant_name || user?.name || 'EnergyFlow'
@@ -74,11 +72,9 @@ export function Sidebar() {
       case 'org_owner':
         if (isPersonalOwner) {
           items.push(
-            { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
-            { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
-            { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
             { label: 'Inventory', href: '/gas/inventory', icon: Package },
             { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
+            { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
             { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
             { label: 'User', href: '/users', icon: Users },
             { label: 'Reports', href: '/reports', icon: FileText },
@@ -103,14 +99,12 @@ export function Sidebar() {
           items.push(
             { label: 'Gas Branches', href: '/gas/branches', icon: Wind },
             { label: 'Fuel Branches', href: '/fuel/branches', icon: Fuel },
-            { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
-            { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
-            { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
             {
               label: 'Gas Sales',
               icon: Wind,
               children: [
                 { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
+                { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
                 { label: 'Expenses', href: '/gas/expenses', icon: AlertCircle },
                 { label: 'Inventory', href: '/gas/inventory', icon: Package },
               ]
@@ -128,11 +122,9 @@ export function Sidebar() {
         } else if (hasGas) {
           items.push(
             { label: 'Gas Branches', href: '/gas/branches', icon: Wind },
-            { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
-            { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
-            { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
             { label: 'Inventory', href: '/gas/inventory', icon: Package },
             { label: 'Gas Sales', href: '/gas/sales', icon: ShoppingCart },
+            { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
             { label: 'Expenses', href: '/gas/expenses', icon: AlertCircle }
           )
         } else if (hasFuel) {
@@ -155,11 +147,9 @@ export function Sidebar() {
 
       case 'gas_manager':
         items.push(
-          { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
-          { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
-          { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
           { label: 'Inventory', href: '/gas/inventory', icon: Package },
           { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
+          { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
           { label: 'Expenses', href: '/gas/expenses', icon: AlertCircle },
           { label: 'Users', href: '/users', icon: Users },
           { label: 'Reports', href: '/reports', icon: FileText },
@@ -178,11 +168,19 @@ export function Sidebar() {
         break
 
       case 'sales_staff':
-        items.push(
-          { label: 'Sales', href: '/sales', icon: ShoppingCart },
-          { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
-          { label: 'My Transactions', href: '/transactions', icon: FileText }
-        )
+        if (selectedBranchType === 'gas') {
+          items.push(
+            { label: 'Sales', href: '/sales', icon: ShoppingCart },
+            { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
+            { label: 'My Transactions', href: '/transactions', icon: FileText }
+          )
+        } else {
+          items.push(
+            { label: 'Sales', href: '/sales', icon: ShoppingCart },
+            { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
+            { label: 'My Transactions', href: '/transactions', icon: FileText }
+          )
+        }
         break
     }
 
@@ -277,7 +275,7 @@ export function Sidebar() {
         <div className="px-4 py-2 rounded-lg bg-sidebar-accent/10">
           <p className="text-xs text-sidebar-foreground/60">Logged in as</p>
           <p className="font-semibold text-sm truncate">{user.name}</p>
-          <p className="text-xs text-sidebar-foreground/50 capitalize">{user.role.replace(/_/g, ' ')}</p>
+          <p className="text-xs text-sidebar-foreground/50">{formatRoleName(user.role)}</p>
         </div>
         <button
           onClick={logout}

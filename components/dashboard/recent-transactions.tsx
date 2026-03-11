@@ -57,6 +57,11 @@ export function RecentTransactions() {
           Promise.all(fuelBranches.map((b: any) => apiService.getShiftReconciliations(b.id).catch(() => []))),
         ])
 
+        const parseGasSalesperson = (notes: string) => {
+          const match = String(notes ?? '').match(/salesperson:([^|]+)/)
+          return match ? match[1].trim().toLowerCase() : ''
+        }
+
         const gasTx: TxItem[] = gasLists.flat().map((tx: any) => ({
           id: `gas-${tx.id}`,
           source: 'gas',
@@ -64,6 +69,7 @@ export function RecentTransactions() {
           details: `${tx.quantity ?? 0}kg`,
           amount: Number(tx.amount ?? 0),
           created_at: String(tx.created_at ?? new Date().toISOString()),
+          created_by_role: parseGasSalesperson(tx.notes),
         }))
 
         const fuelTx: TxItem[] = fuelLists.flat().map((tx: any) => ({
@@ -76,9 +82,9 @@ export function RecentTransactions() {
           created_by_role: String(tx.created_by_role ?? '').trim().toLowerCase(),
         }))
 
-        const merged = [...gasTx, ...fuelTx]
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 20)
+        const merged = [...gasTx, ...fuelTx].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        )
 
         setTransactions(merged)
       } finally {
@@ -107,18 +113,25 @@ export function RecentTransactions() {
     })
   }
 
-  const monthGroups = useMemo(() => {
+  const dayGroups = useMemo(() => {
     const groups: Record<string, TxItem[]> = {}
     transactions.forEach((t) => {
       const date = new Date(t.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = date.toISOString().slice(0, 10)
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }, [transactions])
 
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const currentDay = new Date().toISOString().slice(0, 10)
+  const isSalesStaffTransaction = (t: TxItem) => {
+    if (t.source === 'gas') {
+      const salesperson = String(t.created_by_role ?? '').toLowerCase()
+      return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
+    }
+    return t.created_by_role === 'sales_staff'
+  }
 
   return (
     <Card className="shadow-card mb-8">
@@ -135,21 +148,27 @@ export function RecentTransactions() {
           <p className="text-muted-foreground">No transactions yet</p>
         </div>
       ) : (
-        <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-          {monthGroups.map(([monthKey, monthTransactions]) => {
-            const date = new Date(monthKey + '-01')
-            const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-            const salesStaffTotal = monthTransactions
-              .filter((t) => t.source === 'gas' || t.created_by_role === 'sales_staff')
+        <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
+          {dayGroups.map(([dayKey, dayTransactions]) => {
+            const date = new Date(dayKey)
+            const dayName = date.toLocaleDateString('en-NG', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            })
+            const salesStaffTotal = dayTransactions
+              .filter(isSalesStaffTransaction)
               .reduce((sum, t) => sum + t.amount, 0)
+            const salesStaffCount = dayTransactions.filter(isSalesStaffTransaction).length
 
             return (
-              <AccordionItem key={monthKey} value={monthKey} className="border-b">
+              <AccordionItem key={dayKey} value={dayKey} className="border-b">
                 <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                   <div className="flex items-center justify-between w-full pr-4">
-                    <span className="font-semibold">{monthName}</span>
+                    <span className="font-semibold">{dayName}</span>
                     <span className="text-sm text-muted-foreground">
-                      {monthTransactions.length} transactions • ₦{salesStaffTotal.toLocaleString()}
+                      {salesStaffCount} transactions • ₦{salesStaffTotal.toLocaleString()}
                     </span>
                   </div>
                 </AccordionTrigger>
@@ -165,7 +184,7 @@ export function RecentTransactions() {
                         </tr>
                       </thead>
                       <tbody>
-                        {monthTransactions.map((transaction) => {
+                        {dayTransactions.map((transaction) => {
                           const colorClass = getTransactionColor(transaction.source)
                           return (
                             <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">

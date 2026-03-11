@@ -78,7 +78,6 @@ export default function ExpensesPage() {
   }, [expenses, isOwner, localSelectedBranchId])
 
   const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
-  const avgExpense = visibleExpenses.length > 0 ? totalExpenses / visibleExpenses.length : 0
 
   const groupByMonth = (items: ExpenseItem[]) => {
     const groups: Record<string, ExpenseItem[]> = {}
@@ -350,9 +349,8 @@ export default function ExpensesPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <MetricCard label="Total Expenses" value={`N${(totalExpenses / 1000).toFixed(0)}K`} icon={TrendingDown} variant="primary" />
-        <MetricCard label="Average Expense" value={`N${(avgExpense / 1000).toFixed(0)}K`} variant="secondary" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <MetricCard label="Total Expenses" value={`₦${(totalExpenses / 1000).toFixed(0)}K`} icon={TrendingDown} variant="primary" />
         <MetricCard label="Expense Count" value={visibleExpenses.length} variant="accent" />
       </div>
 

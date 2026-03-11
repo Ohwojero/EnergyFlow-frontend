@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ShoppingCart, TrendingUp, ArrowUpRight, Edit, Trash2 } from 'lucide-react'
+import { ShoppingCart, TrendingUp, ArrowUpRight, Edit, Trash2, DollarSign } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -58,6 +58,9 @@ export default function GasSalesPage() {
   const canEditDelete = isOwner || isManager
 
   const [branches, setBranches] = useState<Branch[]>([])
+  const [branchUsers, setBranchUsers] = useState<any[]>([])
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
+  const [expenses, setExpenses] = useState<any[]>([])
   const [localSelectedBranchId, setLocalSelectedBranchId] = useState<string | null>(() =>
     user?.role === 'org_owner' ? null : selectedBranchId,
   )
@@ -69,11 +72,15 @@ export default function GasSalesPage() {
   const [salesTransactions, setSalesTransactions] = useState<SaleTransaction[]>([])
   const [editingSale, setEditingSale] = useState<SaleTransaction | null>(null)
   const [formData, setFormData] = useState({
-    quantity: '',
-    amount: '',
-    notes: '',
+    shift_number: '1',
+    pump_number: '',
+    start_reading: '0',
+    end_reading: '0',
+    price_per_kg: '',
     paymentMethod: '',
     salesperson: '',
+    date: new Date().toISOString().slice(0, 10),
+    time: new Date().toTimeString().slice(0, 5),
   })
   const [editFormData, setEditFormData] = useState({
     quantity: '',
@@ -126,6 +133,22 @@ export default function GasSalesPage() {
   }, [])
 
   useEffect(() => {
+    const loadBranchUsers = async () => {
+      if (!isManager || !selectedBranchId) return
+      setIsLoadingUsers(true)
+      try {
+        const users = await apiService.getBranchUsers(selectedBranchId)
+        setBranchUsers(Array.isArray(users) ? users : [])
+      } catch {
+        setBranchUsers([])
+      } finally {
+        setIsLoadingUsers(false)
+      }
+    }
+    loadBranchUsers()
+  }, [isManager, selectedBranchId])
+
+  useEffect(() => {
     const loadSales = async () => {
       setIsLoading(true)
       try {
@@ -133,35 +156,60 @@ export default function GasSalesPage() {
           const targetBranchIds = localSelectedBranchId
             ? [localSelectedBranchId]
             : branches.map((branch) => branch.id)
-          const responses = await Promise.all(
-            targetBranchIds.map(async (branchId) => {
-              const list = await apiService.getGasSales(branchId)
-              return (Array.isArray(list) ? list : []).map((row) => normalizeTransaction(row, branchId))
-            }),
-          )
-          const all = responses.flat().sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-          )
+          const [salesResponses, expenseResponses] = await Promise.all([
+            Promise.all(
+              targetBranchIds.map(async (branchId) => {
+                const list = await apiService.getGasSales(branchId)
+                return (Array.isArray(list) ? list : []).map((row) => normalizeTransaction(row, branchId))
+              }),
+            ),
+            Promise.all(
+              targetBranchIds.map(async (branchId) => {
+                const list = await apiService.getGasExpenses(branchId)
+                return Array.isArray(list) ? list : []
+              }),
+            ),
+          ])
+          const all = salesResponses.flat()
+            .filter((transaction) => {
+              // Exclude payment records from sales
+              const notes = String(transaction.notes ?? '').toLowerCase()
+              return !notes.includes('type:payment_record')
+            })
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
           setSalesTransactions(all)
+          setExpenses(expenseResponses.flat())
           return
         }
 
         const fallbackBranchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
         if (!fallbackBranchId) {
           setSalesTransactions([])
+          setExpenses([])
           return
         }
-        const list = await apiService.getGasSales(fallbackBranchId)
-        const normalized = (Array.isArray(list) ? list : []).map((row) =>
-          normalizeTransaction(row, fallbackBranchId),
-        )
+        const [list, expenseList] = await Promise.all([
+          isSalesStaff ? apiService.getMyGasSales(fallbackBranchId) : apiService.getGasSales(fallbackBranchId),
+          apiService.getGasExpenses(fallbackBranchId),
+        ])
+        
+        const normalized = (Array.isArray(list) ? list : [])
+          .map((row) => normalizeTransaction(row, fallbackBranchId))
+          .filter((transaction) => {
+            // Exclude payment records from sales
+            const notes = String(transaction.notes ?? '').toLowerCase()
+            return !notes.includes('type:payment_record')
+          })
+        
         setSalesTransactions(normalized)
+        setExpenses(Array.isArray(expenseList) ? expenseList : [])
       } catch {
         toast({
           title: 'Load failed',
           description: 'Could not load gas sales.',
         })
         setSalesTransactions([])
+        setExpenses([])
       } finally {
         setIsLoading(false)
       }
@@ -170,10 +218,36 @@ export default function GasSalesPage() {
     if (branches.length > 0 || selectedBranchId || isOwner) {
       loadSales()
     }
-  }, [branches, isOwner, localSelectedBranchId, selectedBranchId, user?.assigned_branches])
+  }, [branches, isOwner, localSelectedBranchId, selectedBranchId, user?.assigned_branches, isSalesStaff, user?.id])
 
-  const totalSales = salesTransactions.reduce((sum, t) => sum + t.amount, 0)
-  const avgSaleValue = salesTransactions.length > 0 ? totalSales / salesTransactions.length : 0
+  const openingReadingValue = Number(formData.start_reading)
+  const closingReadingValue = Number(formData.end_reading)
+  const pricePerKgValue = Number(formData.price_per_kg)
+  const kgSold = Number.isNaN(openingReadingValue) || Number.isNaN(closingReadingValue)
+    ? 0
+    : closingReadingValue - openingReadingValue
+  const computedSalesAmount = Number.isNaN(pricePerKgValue)
+    ? 0
+    : kgSold * pricePerKgValue
+
+  const salesStaffSales = salesTransactions.filter((t) => {
+    const salesperson = String(t.salesperson ?? '').toLowerCase()
+    const notes = String(t.notes ?? '').toLowerCase()
+    // Exclude payment records and only include sales staff transactions
+    return !notes.includes('type:payment_record') && 
+           (salesperson === 'sales_staff' || 
+            (!salesperson.includes('manager') && 
+             salesperson !== 'manager' && 
+             salesperson !== '' &&
+             !salesperson.startsWith('manager/')))
+  })
+  const managerSales = salesTransactions.filter((t) => {
+    const salesperson = String(t.salesperson ?? '').toLowerCase()
+    return salesperson.includes('manager') || salesperson === 'manager'
+  })
+  const totalSales = salesStaffSales.reduce((sum, t) => sum + t.amount, 0)
+  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0)
+  const totalSalesMinusExpense = totalSales - totalExpenses
   const formatMoneyShort = (amount: number) => {
     if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
     if (amount >= 1000) return `N${(amount / 1000).toFixed(1)}K`
@@ -189,39 +263,45 @@ export default function GasSalesPage() {
       minute: '2-digit',
     })
 
-  const groupByMonth = (transactions: SaleTransaction[]) => {
+  const groupByDay = (transactions: SaleTransaction[]) => {
     const groups: Record<string, SaleTransaction[]> = {}
     transactions.forEach((t) => {
       const date = new Date(t.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = date.toISOString().slice(0, 10)
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const monthGroups = groupByMonth(salesTransactions)
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const dayGroups = groupByDay(salesTransactions)
+  const currentDay = new Date().toISOString().slice(0, 10)
 
   const resetForm = () => {
     setFormData({
-      quantity: '',
-      amount: '',
-      notes: '',
+      shift_number: String((salesTransactions[0]?.quantity ?? 0) + 1),
+      pump_number: '',
+      start_reading: '0',
+      end_reading: '0',
+      price_per_kg: '',
       paymentMethod: '',
       salesperson: '',
+      date: new Date().toISOString().slice(0, 10),
+      time: new Date().toTimeString().slice(0, 5),
     })
   }
 
   const handleSaveSale = async (e: FormEvent) => {
     e.preventDefault()
-    const quantity = Number(formData.quantity)
-    const amount = Number(formData.amount)
-    const notes = formData.notes.trim()
+    const startReading = Number(formData.start_reading)
+    const endReading = Number(formData.end_reading)
+    const pricePerKg = Number(formData.price_per_kg)
+    const quantity = kgSold
+    const amount = computedSalesAmount
 
-    const salespersonValue = isSalesStaff ? 'sales_staff' : formData.salesperson
+    const salespersonValue = isSalesStaff ? user?.name || 'Sales Staff' : formData.salesperson
 
-    if (!quantity || !amount || !formData.paymentMethod || !salespersonValue) {
+    if (!formData.pump_number || !salespersonValue || !pricePerKg) {
       toast({
         title: 'Missing details',
         description: 'All fields are required.',
@@ -229,10 +309,18 @@ export default function GasSalesPage() {
       return
     }
 
-    if (quantity <= 0 || amount <= 0) {
+    if (pricePerKg <= 0 || amount <= 0 || quantity <= 0) {
       toast({
         title: 'Invalid values',
-        description: 'Quantity and amount must be greater than zero.',
+        description: 'Price and readings must be valid.',
+      })
+      return
+    }
+
+    if (endReading < startReading) {
+      toast({
+        title: 'Invalid readings',
+        description: 'Closing reading cannot be less than opening reading.',
       })
       return
     }
@@ -252,22 +340,30 @@ export default function GasSalesPage() {
 
     setIsSubmitting(true)
     try {
+      const dateValue = formData.date || new Date().toISOString().slice(0, 10)
+      const timeValue = formData.time || new Date().toTimeString().slice(0, 5)
+      const customTimestamp = new Date(`${dateValue}T${timeValue}:00`).toISOString()
+      
       const created = await apiService.createGasSale({
         branch_id: branchId,
         type: 'sale',
         cylinder_size: `${quantity}kg`,
         quantity,
         amount,
-        notes: `${notes || 'Direct sales entry'} | payment:${formData.paymentMethod} | salesperson:${salespersonValue}`,
+        notes: `salesperson:${salespersonValue} | shift:${formData.shift_number} | pump:${formData.pump_number} | start:${startReading} | end:${endReading} | price:${pricePerKg}`,
+        created_at: customTimestamp,
       })
+      
       const nextSale = normalizeTransaction(created, branchId)
       nextSale.branch_name = branches.find((branch) => branch.id === branchId)?.name
       nextSale.payment_method = formData.paymentMethod
       nextSale.salesperson = salespersonValue
+      
       setSalesTransactions((prev) => [nextSale, ...prev])
       toast({
         title: 'Sale recorded',
         description: 'Gas sale transaction added successfully.',
+        className: 'bg-green-100 border-green-500 text-green-800',
       })
       setIsRecordSaleOpen(false)
       resetForm()
@@ -275,6 +371,7 @@ export default function GasSalesPage() {
       toast({
         title: 'Save failed',
         description: error instanceof Error ? error.message : 'Could not save gas sale.',
+        className: 'bg-red-100 border-red-500 text-red-800',
       })
     } finally {
       setIsSubmitting(false)
@@ -331,6 +428,7 @@ export default function GasSalesPage() {
       toast({
         title: 'Sale updated',
         description: 'Sale transaction was updated successfully.',
+        className: 'bg-blue-100 border-blue-500 text-blue-800',
       })
       setIsEditSaleOpen(false)
       setEditingSale(null)
@@ -338,6 +436,7 @@ export default function GasSalesPage() {
       toast({
         title: 'Update failed',
         description: error instanceof Error ? error.message : 'Request failed',
+        className: 'bg-red-100 border-red-500 text-red-800',
       })
     } finally {
       setIsSubmitting(false)
@@ -352,11 +451,13 @@ export default function GasSalesPage() {
       toast({
         title: 'Sale deleted',
         description: 'Sale transaction was deleted successfully.',
+        className: 'bg-red-100 border-red-500 text-red-800',
       })
     } catch (error) {
       toast({
         title: 'Delete failed',
         description: error instanceof Error ? error.message : 'Request failed',
+        className: 'bg-red-100 border-red-500 text-red-800',
       })
     } finally {
       setIsSubmitting(false)
@@ -421,20 +522,9 @@ export default function GasSalesPage() {
               12%
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Total Sales</p>
+          <p className="text-sm text-muted-foreground mb-1">{isOwner ? 'Total Sales from all Pump' : isManager ? 'Total Sales from all Pump' : 'Total Sales'}</p>
           <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSales)}</h3>
           <p className="text-xs text-muted-foreground mt-2">This period</p>
-        </Card>
-
-        <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 bg-green-600/20 rounded-lg">
-              <ShoppingCart className="w-6 h-6 text-green-600 dark:text-green-400" />
-            </div>
-          </div>
-          <p className="text-sm text-muted-foreground mb-1">Average Sale</p>
-          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(avgSaleValue)}</h3>
-          <p className="text-xs text-muted-foreground mt-2">Per transaction</p>
         </Card>
 
         <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
@@ -446,6 +536,17 @@ export default function GasSalesPage() {
           <p className="text-sm text-muted-foreground mb-1">Transactions</p>
           <h3 className="text-3xl font-bold text-foreground">{salesTransactions.length}</h3>
           <p className="text-xs text-muted-foreground mt-2">Recorded sales</p>
+        </Card>
+
+        <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+          <div className="flex items-start justify-between mb-4">
+            <div className="p-3 bg-green-600/20 rounded-lg">
+              <DollarSign className="w-6 h-6 text-green-600 dark:text-green-400" />
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump-Expense</p>
+          <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalSalesMinusExpense)}</h3>
+          <p className="text-xs text-muted-foreground mt-2">Net amount</p>
         </Card>
       </div>
 
@@ -461,19 +562,31 @@ export default function GasSalesPage() {
             <p className="text-muted-foreground">No sales transactions recorded yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-            {monthGroups.map(([monthKey, transactions]) => {
-              const date = new Date(monthKey + '-01')
-              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = transactions.reduce((sum, t) => sum + t.amount, 0)
+          <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
+            {dayGroups.map(([dayKey, transactions]) => {
+              const date = new Date(dayKey)
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              
+              const salesStaffTransactions = transactions.filter((t) => {
+                const salesperson = String(t.salesperson ?? '').toLowerCase()
+                const notes = String(t.notes ?? '').toLowerCase()
+                // Exclude payment records and only include sales staff transactions
+                return !notes.includes('type:payment_record') && 
+                       (salesperson === 'sales_staff' || 
+                        (!salesperson.includes('manager') && 
+                         salesperson !== 'manager' && 
+                         salesperson !== '' &&
+                         !salesperson.startsWith('manager/')))
+              })
+              const dayTotal = salesStaffTransactions.reduce((sum, t) => sum + t.amount, 0)
 
               return (
-                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionItem key={dayKey} value={dayKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
-                      <span className="font-semibold">{monthName}</span>
+                      <span className="font-semibold">{dayName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {transactions.length} sales • N{monthTotal.toLocaleString()}
+                        {salesStaffTransactions.length} sales • ₦{dayTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -482,28 +595,35 @@ export default function GasSalesPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date & Time</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Time</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Branch</th>
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Kg Sold</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Details</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Payment</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Salesperson</th>
-                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Notes</th>
                             {canEditDelete && <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>}
                           </tr>
                         </thead>
                         <tbody>
                           {transactions.map((transaction) => (
                             <tr key={transaction.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                              <td className="px-6 py-4 text-foreground">{formatDate(transaction.created_at)}</td>
+                              <td className="px-6 py-4 text-foreground">
+                                {new Date(transaction.created_at).toLocaleTimeString('en-NG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </td>
                               <td className="px-6 py-4 text-foreground">
                                 {transaction.branch_name ?? branches.find((b) => b.id === transaction.branch_id)?.name ?? 'Unknown Branch'}
                               </td>
-                              <td className="px-6 py-4 text-foreground">{transaction.quantity} kg</td>
-                              <td className="px-6 py-4 font-semibold text-foreground">N{transaction.amount.toLocaleString()}</td>
-                              <td className="px-6 py-4 text-foreground capitalize">{transaction.payment_method || 'N/A'}</td>
+                              <td className="px-6 py-4 text-foreground text-sm">
+                                {transaction.notes?.match(/shift:(\d+)/)?.[1] && `shift:${transaction.notes.match(/shift:(\d+)/)?.[1]}`}
+                                {transaction.notes?.match(/pump:(\d+)/)?.[1] && ` | pump:${transaction.notes.match(/pump:(\d+)/)?.[1]}`}
+                                {transaction.notes?.match(/start:(\d+)/)?.[1] && ` | start:${transaction.notes.match(/start:(\d+)/)?.[1]}`}
+                                {transaction.notes?.match(/end:(\d+)/)?.[1] && ` | end:${transaction.notes.match(/end:(\d+)/)?.[1]}`}
+                                {transaction.notes?.match(/price:(\d+)/)?.[1] && ` | price:${transaction.notes.match(/price:(\d+)/)?.[1]}`}
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-foreground">₦{transaction.amount.toLocaleString()}</td>
                               <td className="px-6 py-4 text-foreground">{transaction.salesperson || 'N/A'}</td>
-                              <td className="px-6 py-4 text-muted-foreground text-xs">{transaction.notes}</td>
                               {canEditDelete && (
                                 <td className="px-6 py-4">
                                   <div className="flex gap-2">
@@ -548,74 +668,141 @@ export default function GasSalesPage() {
           if (!open) resetForm()
         }}
       >
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Record Gas Sale</DialogTitle>
-            <DialogDescription>Enter daily gas sales transaction details.</DialogDescription>
+            <DialogDescription>Enter gas sales transaction details.</DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSaveSale} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="quantity">Kg Sold</Label>
-              <Input
-                id="quantity"
-                type="number"
-                min="1"
-                value={formData.quantity}
-                onChange={(e) => setFormData((prev) => ({ ...prev, quantity: e.target.value }))}
-                placeholder="e.g. 20 kg"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="paymentMethod">Payment Method</Label>
-              <Select value={formData.paymentMethod} onValueChange={(value) => setFormData((prev) => ({ ...prev, paymentMethod: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select payment method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="cash">Cash on Hand</SelectItem>
-                  <SelectItem value="pos">POS</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="amount">Total Amount</Label>
-              <Input
-                id="amount"
-                type="number"
-                min="1"
-                value={formData.amount}
-                onChange={(e) => setFormData((prev) => ({ ...prev, amount: e.target.value }))}
-                placeholder="e.g. 110000"
-              />
-            </div>
-
-            {!isSalesStaff && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="salesperson">Salesperson</Label>
+                <Label htmlFor="shift_number">Shift Number</Label>
+                <Input
+                  id="shift_number"
+                  type="number"
+                  min="1"
+                  value={formData.shift_number}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, shift_number: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pump_number">Pump Number</Label>
+                <Input
+                  id="pump_number"
+                  type="number"
+                  min="1"
+                  value={formData.pump_number}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, pump_number: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
+            </div>
+
+            {!isSalesStaff && isManager && (
+              <div className="space-y-2">
+                <Label htmlFor="salesperson">Assigned Sales Staff</Label>
                 <Select value={formData.salesperson} onValueChange={(value) => setFormData((prev) => ({ ...prev, salesperson: value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select salesperson" />
+                  <SelectTrigger className="border-2 border-border focus:border-primary">
+                    <SelectValue placeholder="Select person" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value={`Manager/${user?.name || 'Manager'}`}>Manager/{user?.name || 'Manager'}</SelectItem>
+                    {branchUsers
+                      .filter((u) => u.role === 'sales_staff')
+                      .map((u) => (
+                        <SelectItem key={u.id} value={u.name}>
+                          {u.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {!isSalesStaff && isOwner && (
+              <div className="space-y-2">
+                <Label htmlFor="salesperson">Assigned Sales Staff</Label>
+                <Select value={formData.salesperson} onValueChange={(value) => setFormData((prev) => ({ ...prev, salesperson: value }))}>
+                  <SelectTrigger className="border-2 border-border focus:border-primary">
+                    <SelectValue placeholder="Select person" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Manager">Manager</SelectItem>
                     <SelectItem value="sales_staff">Sales Staff</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             )}
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="start_reading">Opening Reading</Label>
+                <Input
+                  id="start_reading"
+                  type="number"
+                  min="0"
+                  value={formData.start_reading}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, start_reading: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="end_reading">Closing Reading</Label>
+                <Input
+                  id="end_reading"
+                  type="number"
+                  min="0"
+                  value={formData.end_reading}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, end_reading: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes (Optional)</Label>
+              <Label htmlFor="price_per_kg">Price Per Kg</Label>
               <Input
-                id="notes"
-                value={formData.notes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                placeholder="Any extra details"
+                id="price_per_kg"
+                type="number"
+                min="1"
+                value={formData.price_per_kg}
+                onChange={(e) => setFormData((prev) => ({ ...prev, price_per_kg: e.target.value }))}
+                placeholder="e.g. 1200"
+                className="border-2 border-border focus-visible:border-primary"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Total Sales (Calculated)</Label>
+              <Input
+                value={Number.isFinite(computedSalesAmount) ? `₦${computedSalesAmount.toLocaleString()}` : '₦0'}
+                readOnly
+                className="border-2 border-border bg-muted/40 text-lg font-semibold"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="sale-date">Date</Label>
+                <Input
+                  id="sale-date"
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sale-time">Time</Label>
+                <Input
+                  id="sale-time"
+                  type="time"
+                  value={formData.time}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, time: e.target.value }))}
+                  className="border-2 border-border focus-visible:border-primary"
+                />
+              </div>
             </div>
 
             <DialogFooter>
@@ -681,14 +868,29 @@ export default function GasSalesPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edit-salesperson">Salesperson</Label>
+              <Label htmlFor="edit-salesperson">Recorded By</Label>
               <Select value={editFormData.salesperson} onValueChange={(value) => setEditFormData((prev) => ({ ...prev, salesperson: value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select salesperson" />
+                  <SelectValue placeholder="Select person" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="sales_staff">Sales Staff</SelectItem>
+                  {isManager ? (
+                    <>
+                      <SelectItem value={`Manager/${user?.name || 'Manager'}`}>Manager/{user?.name || 'Manager'}</SelectItem>
+                      {branchUsers
+                        .filter((u) => u.role === 'sales_staff')
+                        .map((u) => (
+                          <SelectItem key={u.id} value={u.name}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                    </>
+                  ) : (
+                    <>
+                      <SelectItem value="Manager">Manager</SelectItem>
+                      <SelectItem value="sales_staff">Sales Staff</SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             </div>
