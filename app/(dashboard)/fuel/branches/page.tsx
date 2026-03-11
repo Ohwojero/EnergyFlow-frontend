@@ -147,8 +147,24 @@ export default function FuelBranchesPage() {
         .reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
     : 0
   const branchShifts = selectedBranch
-    ? shiftReconciliations.filter((shift) => belongsToSelectedBranch(shift))
+    ? shiftReconciliations.filter((shift) => {
+        if (!belongsToSelectedBranch(shift)) return false
+        // Only show sales_staff shifts in Recent Shifts, just like gas branches
+        const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+        return role === 'sales_staff' || role === 'salesstaff'
+      })
     : []
+
+  const branchShiftsByDay = useMemo(() => {
+    const groups: Record<string, any[]> = {}
+    branchShifts.forEach((shift) => {
+      const createdAt = shift?.created_at ? new Date(shift.created_at) : new Date()
+      const key = createdAt.toISOString().slice(0, 10) // YYYY-MM-DD format
+      if (!groups[key]) groups[key] = []
+      groups[key].push(shift)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }, [branchShifts])
 
   const openDetails = (branchId: string) => {
     setSelectedBranchId(branchId)
@@ -423,28 +439,28 @@ export default function FuelBranchesPage() {
           {selectedBranch && (
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Station</p>
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Station</p>
                   <p className="text-base font-semibold text-foreground">{selectedBranch.name}</p>
                   <p className="text-sm text-muted-foreground">{selectedBranch.location}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Manager</p>
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Manager</p>
                   <p className="text-base font-semibold text-foreground">{getManagerName(selectedBranch)}</p>
                   <p className="text-sm text-muted-foreground capitalize">{selectedBranch.status}</p>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Sales</p>
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Sales</p>
                   <p className="text-lg font-semibold text-foreground">₦{branchSalesValue.toLocaleString()}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Inventory</p>
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Inventory</p>
                   <p className="text-lg font-semibold text-foreground">₦{branchInventoryValue.toLocaleString()}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Shifts</p>
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Shifts</p>
                   <p className="text-lg font-semibold text-foreground">{branchShifts.length}</p>
                 </div>
               </div>
@@ -455,22 +471,51 @@ export default function FuelBranchesPage() {
                       Recent Shifts
                     </AccordionTrigger>
                     <AccordionContent className="pb-0">
-                      <div className="divide-y divide-border/60">
-                        {branchShifts.slice(0, 5).map((shift) => (
-                          <div key={shift.id} className="px-1 py-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="font-medium text-foreground">Shift {shift.shift_number}</span>
-                              <span className="text-foreground">₦{Number(shift.sales_amount ?? 0).toLocaleString()}</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              Pump {shift.pump_number ?? shift.pumpNumber ?? shift.pump?.pump_number ?? shift.pump?.number ?? 'N/A'}
-                            </p>
-                          </div>
-                        ))}
-                        {branchShifts.length === 0 && (
-                          <div className="px-1 py-4 text-sm text-muted-foreground">No shifts yet.</div>
-                        )}
-                      </div>
+                      {branchShifts.length === 0 ? (
+                        <div className="px-1 py-4 text-sm text-muted-foreground">No shifts yet.</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {branchShiftsByDay.map(([dayKey, dayShifts]) => {
+                            const dayDate = new Date(dayKey)
+                            const dayLabel = dayDate.toLocaleDateString('en-NG', {
+                              weekday: 'long',
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric',
+                            })
+                            const dayTotal = dayShifts.reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
+                            return (
+                              <div key={dayKey} className="rounded-md border border-border/60">
+                                <div className="px-3 py-2 border-b border-border/60 bg-muted/30 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                                  <span>{dayLabel}</span>
+                                  <span>{dayShifts.length} shifts • ₦{dayTotal.toLocaleString()}</span>
+                                </div>
+                                <div className="divide-y divide-border/60">
+                                  {dayShifts.map((shift) => (
+                                    <div key={shift.id} className="px-3 py-3 text-sm">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium text-foreground">Shift {shift.shift_number}</span>
+                                        <span className="text-foreground">₦{Number(shift.sales_amount ?? 0).toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between mt-1">
+                                        <p className="text-xs text-muted-foreground">
+                                          Pump {shift.pump_number ?? shift.pumpNumber ?? shift.pump?.pump_number ?? shift.pump?.number ?? 'N/A'}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                          {new Date(shift.created_at).toLocaleTimeString('en-NG', {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                          })}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>

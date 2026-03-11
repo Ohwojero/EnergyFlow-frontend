@@ -62,15 +62,21 @@ export function RecentTransactions() {
           return match ? match[1].trim().toLowerCase() : ''
         }
 
-        const gasTx: TxItem[] = gasLists.flat().map((tx: any) => ({
-          id: `gas-${tx.id}`,
-          source: 'gas',
-          type: 'sale',
-          details: `${tx.quantity ?? 0}kg`,
-          amount: Number(tx.amount ?? 0),
-          created_at: String(tx.created_at ?? new Date().toISOString()),
-          created_by_role: parseGasSalesperson(tx.notes),
-        }))
+        const gasTx: TxItem[] = gasLists.flat()
+          .filter((tx: any) => {
+            const notes = String(tx.notes ?? '').toLowerCase()
+            // Exclude payment records from recent transactions
+            return !notes.includes('type:payment_record')
+          })
+          .map((tx: any) => ({
+            id: `gas-${tx.id}`,
+            source: 'gas',
+            type: 'sale',
+            details: `${tx.quantity ?? 0}kg`,
+            amount: Number(tx.amount ?? 0),
+            created_at: String(tx.created_at ?? new Date().toISOString()),
+            created_by_role: parseGasSalesperson(tx.notes),
+          }))
 
         const fuelTx: TxItem[] = fuelLists.flat().map((tx: any) => ({
           id: `fuel-${tx.id}`,

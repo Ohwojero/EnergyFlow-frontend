@@ -237,6 +237,19 @@ class ApiService {
     return this.request('/gas/expenses')
   }
 
+  async updateGasExpense(id: string, data: any) {
+    return this.request(`/gas/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteGasExpense(id: string) {
+    return this.request(`/gas/expenses/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
   async createGasCylinder(data: any) {
     return this.request('/gas/cylinders', {
       method: 'POST',
@@ -294,10 +307,6 @@ class ApiService {
     return this.request(`/fuel/reconciliations/my/${branchId}`);
   }
 
-  async getMyShiftReconciliations(branchId: string) {
-    return this.request(`/fuel/reconciliations/my/${branchId}`);
-  }
-
   async updateShiftReconciliation(id: string, data: any) {
     return this.request(`/fuel/reconciliations/${id}`, {
       method: 'PUT',
@@ -341,6 +350,14 @@ class ApiService {
 
   async getFuelAnalytics(branchId: string) {
     return this.request(`/fuel/analytics/${branchId}`);
+  }
+
+  async debugFuelReconciliations() {
+    return this.request('/fuel/debug/reconciliations');
+  }
+
+  async debugMyFuelReconciliations(branchId: string) {
+    return this.request(`/fuel/debug/my-reconciliations/${branchId}`);
   }
 
   // Fuel Transfer APIs

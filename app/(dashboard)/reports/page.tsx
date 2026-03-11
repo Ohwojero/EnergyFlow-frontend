@@ -9,6 +9,8 @@ import { BarChart3, TrendingUp, Download } from 'lucide-react'
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { Bar, BarChart, CartesianGrid, XAxis } from 'recharts'
 import { apiService } from '@/lib/api'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import type { GasTransaction, ShiftReconciliation } from '@/types'
 
 type FuelExpenseRecord = {
@@ -21,12 +23,23 @@ type FuelExpenseRecord = {
 export default function ReportsPage() {
   const { user, selectedBranchId, selectedBranchType } = useAuth()
   const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const isOwner = user?.role === 'org_owner'
   const [gasSalesRecords, setGasSalesRecords] = useState<GasTransaction[]>([])
   const [fuelShiftRecords, setFuelShiftRecords] = useState<ShiftReconciliation[]>([])
   const [fuelExpenseRecords, setFuelExpenseRecords] = useState<FuelExpenseRecord[]>([])
   const [gasExpenseRecords, setGasExpenseRecords] = useState<FuelExpenseRecord[]>([])
   const [branches, setBranches] = useState<any[]>([])
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
+  const [businessTypeFilter, setBusinessTypeFilter] = useState<'all' | 'gas' | 'fuel'>('all')
+  const [lastCheckedDate, setLastCheckedDate] = useState(() => {
+    // Try to get from localStorage, fallback to today
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('energyflow_last_checked_date')
+      return stored || toDateKey(new Date())
+    }
+    return toDateKey(new Date())
+  })
+  const [isResettingForNewDay, setIsResettingForNewDay] = useState(false)
 
   const reloadRecords = useCallback(() => {
     const load = async () => {
@@ -36,6 +49,23 @@ export default function ReportsPage() {
 
       const gasBranches = branchList.filter((branch: any) => branch.type === 'gas')
       const fuelBranches = branchList.filter((branch: any) => branch.type === 'fuel')
+      
+      // Debug: Log branch information
+      console.log('All branches:', branchList.length)
+      console.log('Gas branches:', gasBranches.length)
+      console.log('Fuel branches:', fuelBranches.length)
+      console.log('User role:', user?.role)
+      console.log('Selected branch ID:', selectedBranchId)
+      
+      // Debug: Test fuel reconciliation access for the first fuel branch
+      if (fuelBranches.length > 0 && user?.role !== 'org_owner') {
+        try {
+          const debugResult = await apiService.debugMyFuelReconciliations(fuelBranches[0].id)
+          console.log('Debug fuel reconciliations result:', debugResult)
+        } catch (error) {
+          console.error('Debug fuel reconciliations error:', error)
+        }
+      }
 
       const [gasSalesByBranch, fuelShiftsByBranch, fuelExpensesByBranch, gasExpensesByBranch] = await Promise.all([
         Promise.all(
@@ -45,14 +75,34 @@ export default function ReportsPage() {
           }))
         ),
         Promise.all(
-          fuelBranches.map(async (branch: any) => ({
-            branchId: String(branch.id),
-            payload: await (
-              user?.role === 'org_owner'
-                ? apiService.getShiftReconciliations(branch.id)
-                : apiService.getMyShiftReconciliations(branch.id)
-            ).catch(() => []),
-          }))
+          fuelBranches.map(async (branch: any) => {
+            // For ALL users, always use getShiftReconciliations to get all shifts
+            // Then filter to only sales_staff records for consistent behavior
+            console.log(`Using getShiftReconciliations for branch ${branch.id} (${branch.name})`)
+            
+            const payload = await apiService.getShiftReconciliations(branch.id).catch((error) => {
+              console.error(`Error fetching fuel shifts for branch ${branch.id}:`, error)
+              return []
+            })
+            
+            // Filter to only sales_staff records for ALL users
+            // This ensures consistent behavior across all user roles
+            const filteredPayload = toRecordList(payload).filter((item: any) => {
+              const role = String(item.created_by_role ?? '').trim().toLowerCase()
+              const isSalesStaff = role === 'sales_staff' || role === 'salesstaff'
+              if (!isSalesStaff) {
+                console.log(`Filtering out non-sales_staff record: role=${role}, id=${item.id}`)
+              }
+              return isSalesStaff
+            })
+            
+            console.log(`Original payload count: ${toRecordList(payload).length}, Filtered count: ${filteredPayload.length}`)
+            console.log(`Fuel shifts for branch ${branch.id} (${branch.name}):`, filteredPayload)
+            return {
+              branchId: String(branch.id),
+              payload: filteredPayload
+            }
+          })
         ),
         Promise.all(
           fuelBranches.map(async (branch: any) => ({
@@ -92,6 +142,7 @@ export default function ReportsPage() {
         sales_amount: Number(item.sales_amount ?? item.salesAmount ?? 0),
         variance: Number(item.variance ?? 0),
         created_at: item.created_at ?? item.createdAt ?? new Date().toISOString(),
+        created_by_role: String(item.created_by_role ?? '').trim().toLowerCase(),
       }))
       )
 
@@ -119,33 +170,81 @@ export default function ReportsPage() {
       setGasExpenseRecords(gasExpenses)
     }
     load()
-  }, [])
+  }, [user])
 
   useEffect(() => {
     reloadRecords()
+    
+    // Set up automatic daily reset
+    const checkForNewDay = () => {
+      const currentDate = toDateKey(new Date())
+      if (currentDate !== lastCheckedDate) {
+        console.log('=== NEW DAY DETECTED ===')
+        console.log('Previous date:', lastCheckedDate)
+        console.log('Current date:', currentDate)
+        
+        setIsResettingForNewDay(true)
+        
+        // Reset to current date and reload data
+        setSelectedDate(currentDate)
+        setLastCheckedDate(currentDate)
+        
+        // Persist to localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('energyflow_last_checked_date', currentDate)
+        }
+        
+        // Clear existing data to show reset
+        setGasSalesRecords([])
+        setFuelShiftRecords([])
+        setFuelExpenseRecords([])
+        setGasExpenseRecords([])
+        
+        // Reload fresh data
+        setTimeout(async () => {
+          await reloadRecords()
+          setIsResettingForNewDay(false)
+        }, 100)
+        
+        console.log('Data reset for new day:', currentDate)
+      }
+    }
+    
+    // Check for new day every minute
+    const dailyResetInterval = setInterval(checkForNewDay, 60000)
+    
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
+        checkForNewDay() // Check for new day when page becomes visible
         reloadRecords()
       }
     }
-    window.addEventListener('focus', reloadRecords)
+    
+    const handleFocus = () => {
+      checkForNewDay() // Check for new day when window gets focus
+      reloadRecords()
+    }
+    
+    window.addEventListener('focus', handleFocus)
     window.addEventListener('storage', reloadRecords)
     document.addEventListener('visibilitychange', handleVisibility)
+    
     return () => {
-      window.removeEventListener('focus', reloadRecords)
+      clearInterval(dailyResetInterval)
+      window.removeEventListener('focus', handleFocus)
       window.removeEventListener('storage', reloadRecords)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [reloadRecords])
+  }, [reloadRecords, lastCheckedDate])
 
   const isOrgOwner = user?.role === 'org_owner'
   const showGas = isOrgOwner
-    ? true
+    ? businessTypeFilter === 'all' || businessTypeFilter === 'gas'
     : selectedBranchType
       ? selectedBranchType === 'gas'
       : user?.role === 'gas_manager'
   const showFuel = (isOrgOwner
-    ? true
+    ? businessTypeFilter === 'all' || businessTypeFilter === 'fuel'
     : selectedBranchType
       ? selectedBranchType === 'fuel'
       : user?.role === 'fuel_manager') && !isPersonalOwner
@@ -154,12 +253,28 @@ export default function ReportsPage() {
     if (!user) return new Set<string>()
     if (selectedBranchId) return new Set([selectedBranchId])
     if (isOrgOwner) {
-      // Default owner view keeps all branches for shared metrics.
+      // For org_owner, include ALL branches (both gas and fuel)
       return new Set(branches.map((branch: any) => String(branch.id)))
     }
     const firstAssignedBranchId = user.assigned_branches?.[0]
     return firstAssignedBranchId ? new Set([String(firstAssignedBranchId)]) : new Set<string>()
   }, [user, isOrgOwner, branches, selectedBranchId])
+
+  const allowedGasBranchIds = useMemo(() => {
+    if (!user) return new Set<string>()
+    if (isOrgOwner) {
+      // For org_owner, include ALL gas branches
+      return new Set(branches.filter((branch: any) => String(branch.type) === 'gas').map((branch: any) => String(branch.id)))
+    }
+    if (selectedBranchId) {
+      const selected = branches.find((branch: any) => String(branch.id) === String(selectedBranchId))
+      if (selected && String(selected.type) === 'gas') return new Set([String(selectedBranchId)])
+    }
+    const firstAssignedGasBranchId = (user.assigned_branches ?? []).find((id) =>
+      branches.some((branch: any) => String(branch.id) === String(id) && String(branch.type) === 'gas'),
+    )
+    return firstAssignedGasBranchId ? new Set([String(firstAssignedGasBranchId)]) : new Set<string>()
+  }, [branches, isOrgOwner, selectedBranchId, user])
 
   const allowedFuelBranchIds = useMemo(() => {
     if (!user) return new Set<string>()
@@ -167,23 +282,43 @@ export default function ReportsPage() {
       // For org_owner, include ALL fuel branches
       return new Set(branches.filter((branch: any) => String(branch.type) === 'fuel').map((branch: any) => String(branch.id)))
     }
+    
+    // For non-org_owner users, check assigned branches and selected branch
+    const fuelBranches = branches.filter((branch: any) => String(branch.type) === 'fuel')
+    
     if (selectedBranchId) {
       const selected = branches.find((branch: any) => String(branch.id) === String(selectedBranchId))
-      if (selected && String(selected.type) === 'fuel') return new Set([String(selectedBranchId)])
+      if (selected && String(selected.type) === 'fuel') {
+        return new Set([String(selectedBranchId)])
+      }
     }
-    const firstAssignedFuelBranchId = (user.assigned_branches ?? []).find((id) =>
-      branches.some((branch: any) => String(branch.id) === String(id) && String(branch.type) === 'fuel'),
-    )
-    return firstAssignedFuelBranchId ? new Set([String(firstAssignedFuelBranchId)]) : new Set<string>()
+    
+    // Check assigned branches
+    const assignedBranches = user.assigned_branches ?? []
+    if (assignedBranches.length > 0) {
+      const assignedFuelBranches = fuelBranches.filter((branch: any) => 
+        assignedBranches.includes(String(branch.id))
+      )
+      if (assignedFuelBranches.length > 0) {
+        return new Set(assignedFuelBranches.map((branch: any) => String(branch.id)))
+      }
+    }
+    
+    // If no assigned branches or no fuel branches assigned, but user is fuel_manager, include all fuel branches
+    if (user?.role === 'fuel_manager') {
+      return new Set(fuelBranches.map((branch: any) => String(branch.id)))
+    }
+    
+    return new Set<string>()
   }, [branches, isOrgOwner, selectedBranchId, user])
 
   const scopedGasSales = useMemo(
-    () => gasSalesRecords.filter((transaction) => allowedBranchIds.has(String(transaction.branch_id))),
-    [gasSalesRecords, allowedBranchIds]
+    () => gasSalesRecords.filter((transaction) => allowedGasBranchIds.has(String(transaction.branch_id))),
+    [gasSalesRecords, allowedGasBranchIds]
   )
   const scopedGasExpenses = useMemo(
-    () => gasExpenseRecords.filter((expense) => allowedBranchIds.has(String(expense.branch_id))),
-    [gasExpenseRecords, allowedBranchIds]
+    () => gasExpenseRecords.filter((expense) => allowedGasBranchIds.has(String(expense.branch_id))),
+    [gasExpenseRecords, allowedGasBranchIds]
   )
   const scopedFuelShifts = useMemo(
     () => fuelShiftRecords.filter((shift) => allowedFuelBranchIds.has(String(shift.branch_id))),
@@ -197,6 +332,9 @@ export default function ReportsPage() {
   const gasForDate = useMemo(
     () => scopedGasSales.filter((transaction) => {
       if (toDateKey(new Date(transaction.created_at)) !== selectedDate) return false
+      // Exclude payment records from sales calculations
+      const notes = String(transaction.notes ?? '').toLowerCase()
+      if (notes.includes('type:payment_record')) return false
       // Filter only sales_staff sales
       const salespersonMatch = String(transaction.notes ?? '').match(/salesperson:([^|]+)/)
       const salesperson = salespersonMatch ? salespersonMatch[1].trim().toLowerCase() : ''
@@ -209,7 +347,12 @@ export default function ReportsPage() {
     [scopedGasExpenses, selectedDate]
   )
   const fuelForDate = useMemo(
-    () => scopedFuelShifts.filter((shift) => toDateKey(new Date(shift.created_at)) === selectedDate),
+    () => scopedFuelShifts.filter((shift) => {
+      if (toDateKey(new Date(shift.created_at)) !== selectedDate) return false
+      // Filter only sales_staff shifts (case-insensitive)
+      const role = String(shift.created_by_role ?? '').trim().toLowerCase()
+      return role === 'sales_staff' || role === 'salesstaff'
+    }),
     [scopedFuelShifts, selectedDate]
   )
   const fuelExpensesForDate = useMemo(
@@ -221,6 +364,16 @@ export default function ReportsPage() {
   const gasDailyKg = gasForDate.reduce((sum, transaction) => sum + transaction.quantity, 0)
   const gasDailyExpenses = gasExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
   const gasSalesMinusExpense = gasDailySales - gasDailyExpenses
+  
+  // Debug logging for gas data
+  console.log('=== GAS REPORTS DEBUG ===')
+  console.log('Gas branches:', branches.filter(b => b.type === 'gas').length)
+  console.log('Gas sales records:', gasSalesRecords.length)
+  console.log('Scoped gas sales:', scopedGasSales.length)
+  console.log('Gas for date:', gasForDate.length)
+  console.log('Gas daily sales:', gasDailySales)
+  console.log('Selected date:', selectedDate)
+  
   const fuelDailySales = fuelForDate.reduce((sum, shift) => sum + shift.sales_amount, 0)
   const fuelDailyExpenses = fuelExpensesForDate.reduce((sum, expense) => sum + expense.amount, 0)
   const totalSalesMinusExpense = fuelDailySales - fuelDailyExpenses
@@ -228,6 +381,27 @@ export default function ReportsPage() {
     (sum, shift) => sum + Math.max(0, shift.end_reading - shift.start_reading),
     0
   )
+  
+  // Debug logging for fuel data
+  console.log('=== FUEL REPORTS DEBUG ===')
+  console.log('User:', user?.name, 'Role:', user?.role)
+  console.log('Selected date:', selectedDate)
+  console.log('Last checked date:', lastCheckedDate)
+  console.log('Is resetting for new day:', isResettingForNewDay)
+  console.log('Selected branch ID:', selectedBranchId)
+  console.log('User assigned branches:', user?.assigned_branches)
+  console.log('All branches:', branches.length)
+  console.log('Fuel branches:', branches.filter(b => b.type === 'fuel').length)
+  console.log('Fuel shift records:', fuelShiftRecords.length)
+  console.log('Scoped fuel shifts:', scopedFuelShifts.length)
+  console.log('Fuel for date:', fuelForDate.length)
+  console.log('Fuel daily sales:', fuelDailySales)
+  console.log('Allowed fuel branch IDs:', Array.from(allowedFuelBranchIds))
+  console.log('Sample fuel shift:', fuelShiftRecords[0])
+  console.log('Sample scoped fuel shift:', scopedFuelShifts[0])
+  if (fuelForDate.length > 0) {
+    console.log('Sample fuel for date:', fuelForDate[0])
+  }
 
   const gasChartData = useMemo(() => {
     const endDate = new Date(`${selectedDate}T00:00:00`)
@@ -238,6 +412,9 @@ export default function ReportsPage() {
       const dateKey = toDateKey(current)
       const dayRecords = scopedGasSales.filter((record) => {
         if (toDateKey(new Date(record.created_at)) !== dateKey) return false
+        // Exclude payment records from chart data
+        const notes = String(record.notes ?? '').toLowerCase()
+        if (notes.includes('type:payment_record')) return false
         // Filter only sales_staff sales
         const salespersonMatch = String(record.notes ?? '').match(/salesperson:([^|]+)/)
         const salesperson = salespersonMatch ? salespersonMatch[1].trim().toLowerCase() : ''
@@ -251,10 +428,27 @@ export default function ReportsPage() {
     }
     return series
   }, [scopedGasSales, selectedDate])
-  const fuelChartData = useMemo(
-    () => buildDailySeries(scopedFuelShifts, (record) => record.sales_amount, selectedDate),
-    [scopedFuelShifts, selectedDate]
-  )
+  const fuelChartData = useMemo(() => {
+    const endDate = new Date(`${selectedDate}T00:00:00`)
+    const series: Array<{ date: string; sales: number }> = []
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const current = new Date(endDate)
+      current.setDate(endDate.getDate() - offset)
+      const dateKey = toDateKey(current)
+      const dayRecords = scopedFuelShifts.filter((record) => {
+        if (toDateKey(new Date(record.created_at)) !== dateKey) return false
+        // Filter only sales_staff shifts (case-insensitive)
+        const role = String(record.created_by_role ?? '').trim().toLowerCase()
+        return role === 'sales_staff' || role === 'salesstaff'
+      })
+      const totalSales = dayRecords.reduce((sum, record) => sum + record.sales_amount, 0)
+      series.push({
+        date: `${current.getDate()}/${current.getMonth() + 1}`,
+        sales: totalSales,
+      })
+    }
+    return series
+  }, [scopedFuelShifts, selectedDate])
 
   const chartConfig = {
     sales: { label: 'Total Sales from all Pump', color: '#2563eb' },
@@ -301,10 +495,27 @@ export default function ReportsPage() {
           </h1>
           <p className="text-muted-foreground">Check daily sales by date for gas and fuel.</p>
         </div>
-        <Button onClick={handleExportReport} className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
-          <Download className="w-4 h-4" />
-          Export Report
-        </Button>
+        <div className="flex items-center gap-4">
+          {isOwner && !isPersonalOwner && (
+            <div className="flex items-center gap-2">
+              <Label className="font-semibold text-foreground text-sm min-w-fit">Filter by:</Label>
+              <Select value={businessTypeFilter} onValueChange={(value: 'all' | 'gas' | 'fuel') => setBusinessTypeFilter(value)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Business</SelectItem>
+                  <SelectItem value="gas">Gas Only</SelectItem>
+                  <SelectItem value="fuel">Fuel Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <Button onClick={handleExportReport} className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
+            <Download className="w-4 h-4" />
+            Export Report
+          </Button>
+        </div>
       </div>
 
       <Card className="p-4 md:p-6 mb-8 shadow-card">
@@ -312,6 +523,9 @@ export default function ReportsPage() {
           <div>
             <h3 className="text-sm font-semibold text-muted-foreground uppercase">Reporting Date</h3>
             <p className="text-lg font-bold text-foreground">{formatSelectedDate(selectedDate)}</p>
+            {isResettingForNewDay && (
+              <p className="text-sm text-blue-600 mt-1 animate-pulse">🔄 Resetting data for new day...</p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -328,7 +542,23 @@ export default function ReportsPage() {
             />
             <button
               className="px-3 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-              onClick={() => setSelectedDate(toDateKey(new Date()))}
+              onClick={() => {
+                const today = toDateKey(new Date())
+                setSelectedDate(today)
+                setLastCheckedDate(today)
+                
+                // Persist to localStorage
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('energyflow_last_checked_date', today)
+                }
+                
+                // Clear and reload data for today
+                setGasSalesRecords([])
+                setFuelShiftRecords([])
+                setFuelExpenseRecords([])
+                setGasExpenseRecords([])
+                setTimeout(() => reloadRecords(), 100)
+              }}
             >
               Today
             </button>
@@ -464,15 +694,15 @@ function formatSelectedDate(dateKey: string): string {
 }
 
 function formatMoney(amount: number): string {
-  return `\u20A6${Math.round(amount).toLocaleString()}`
+  return `₦${Math.round(amount).toLocaleString()}`
 }
 
 function formatMoneyShort(amount: number): string {
   if (Math.abs(amount) >= 1000000) {
-    return `\u20A6${(amount / 1000000).toFixed(2)}M`
+    return `₦${(amount / 1000000).toFixed(2).replace('.', ',')}M`
   }
   if (Math.abs(amount) >= 1000) {
-    return `\u20A6${(amount / 1000).toFixed(2)}K`
+    return `₦${(amount / 1000).toFixed(2).replace('.', ',')}K`
   }
   return formatMoney(amount)
 }

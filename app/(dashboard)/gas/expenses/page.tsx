@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/metric-card'
-import { AlertCircle, TrendingDown } from 'lucide-react'
+import { AlertCircle, TrendingDown, Edit, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
 import { Input } from '@/components/ui/input'
@@ -39,11 +39,19 @@ export default function GasExpensesPage() {
   const [expenses, setExpenses] = useState<ExpenseItem[]>([])
   const [salesTransactions, setSalesTransactions] = useState<any[]>([])
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false)
+  const [isEditExpenseOpen, setIsEditExpenseOpen] = useState(false)
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [activeBranchId, setActiveBranchId] = useState('')
   const [formData, setFormData] = useState({
     branchId: '',
+    category: 'cylinder_repair',
+    amount: '',
+    description: '',
+  })
+
+  const [editFormData, setEditFormData] = useState({
     category: 'cylinder_repair',
     amount: '',
     description: '',
@@ -165,11 +173,6 @@ export default function GasExpensesPage() {
     return match ? match[1].trim().toLowerCase() : ''
   }
 
-  const salesStaffSales = visibleSales.filter((sale: any) => {
-    const salesperson = parseSalesperson(sale.notes)
-    return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
-  })
-
   const isSameLocalDay = (value: string | Date, today: Date) => {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return false
@@ -184,8 +187,17 @@ export default function GasExpensesPage() {
   const totalExpenses = visibleExpenses
     .filter((exp) => isSameLocalDay(exp.created_at, now))
     .reduce((sum, exp) => sum + exp.amount, 0)
-  const totalSales = salesStaffSales
-    .filter((sale: any) => isSameLocalDay(sale.created_at, now))
+  
+  // Sales staff sales only (today's data) - matching dashboard logic exactly
+  const totalSales = visibleSales
+    .filter((sale: any) => {
+      const salesperson = parseSalesperson(sale.notes)
+      const notes = String(sale.notes ?? '').toLowerCase()
+      // Exclude payment records and filter for today only
+      return !notes.includes('type:payment_record') && 
+             isSameLocalDay(sale.created_at, now) &&
+             (salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager'))
+    })
     .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
   const totalSalesMinusExpense = totalSales - totalExpenses
 
@@ -270,6 +282,7 @@ export default function GasExpensesPage() {
       toast({
         title: 'Expense recorded',
         description: 'Gas expense added successfully.',
+        className: 'bg-green-50 border-green-200 text-green-800',
       })
       await loadData()
       setIsExpenseModalOpen(false)
@@ -278,6 +291,84 @@ export default function GasExpensesPage() {
       toast({
         title: 'Failed to save expense',
         description: error instanceof Error ? error.message : 'Request failed',
+        className: 'bg-red-50 border-red-200 text-red-800',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const openEditExpense = (expense: ExpenseItem) => {
+    setEditingExpense(expense)
+    setEditFormData({
+      category: expense.category,
+      amount: String(expense.amount),
+      description: expense.description,
+    })
+    setIsEditExpenseOpen(true)
+  }
+
+  const handleUpdateExpense = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!editingExpense) return
+
+    const amount = Number(editFormData.amount)
+    const description = editFormData.description.trim()
+
+    if (!editFormData.category || !description || !amount || amount <= 0) {
+      toast({
+        title: 'Invalid input',
+        description: 'Check category, amount, and description.',
+        className: 'bg-red-50 border-red-200 text-red-800',
+      })
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await apiService.updateGasExpense(editingExpense.id, {
+        category: editFormData.category,
+        amount,
+        description,
+      })
+      await loadData()
+      toast({
+        title: 'Expense updated',
+        description: 'Expense updated successfully.',
+        className: 'bg-blue-50 border-blue-200 text-blue-800',
+      })
+      setIsEditExpenseOpen(false)
+      setEditingExpense(null)
+    } catch (error) {
+      toast({
+        title: 'Update failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+        className: 'bg-red-50 border-red-200 text-red-800',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteExpense = async (expenseId: string) => {
+    if (!window.confirm('Delete this expense? This action cannot be undone.')) {
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await apiService.deleteGasExpense(expenseId)
+      await loadData()
+      toast({
+        title: 'Expense deleted',
+        description: 'Expense deleted successfully.',
+        className: 'bg-red-50 border-red-200 text-red-800',
+      })
+    } catch (error) {
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Request failed',
+        className: 'bg-red-50 border-red-200 text-red-800',
       })
     } finally {
       setIsSubmitting(false)
@@ -325,14 +416,14 @@ export default function GasExpensesPage() {
             <TrendingDown className="w-6 h-6 text-blue-600 dark:text-blue-400" />
           </div>
           <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000).toFixed(0)}K</h3>
+          <h3 className="text-3xl font-bold text-foreground">₦{(totalSales / 1000).toFixed(0).replace('.', ',')}K</h3>
         </Card>
         <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <div className="p-3 bg-orange-600/20 rounded-lg w-fit mb-4">
             <TrendingDown className="w-6 h-6 text-orange-600 dark:text-orange-400" />
           </div>
           <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump-Expense</p>
-          <h3 className="text-3xl font-bold text-foreground">₦{(totalSalesMinusExpense / 1000).toFixed(0)}K</h3>
+          <h3 className="text-3xl font-bold text-foreground">₦{(totalSalesMinusExpense / 1000).toFixed(0).replace('.', ',')}K</h3>
         </Card>
         <Card className="p-6 bg-purple-100 dark:bg-purple-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <div className="p-3 bg-purple-600/20 rounded-lg w-fit mb-4">
@@ -383,6 +474,7 @@ export default function GasExpensesPage() {
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Category</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
                             <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Amount</th>
+                            <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -400,6 +492,28 @@ export default function GasExpensesPage() {
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.description}</td>
                               <td className="px-6 py-4 font-semibold text-foreground">₦{expense.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4">
+                                <div className="flex gap-2">
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-8 w-8 p-0" 
+                                    onClick={() => openEditExpense(expense)}
+                                    disabled={isSubmitting}
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-8 w-8 p-0 text-red-600 hover:bg-red-50" 
+                                    onClick={() => handleDeleteExpense(expense.id)}
+                                    disabled={isSubmitting}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -486,6 +600,68 @@ export default function GasExpensesPage() {
               </Button>
               <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 {isSubmitting ? 'Saving...' : 'Save Expense'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={isEditExpenseOpen}
+        onOpenChange={(open) => {
+          setIsEditExpenseOpen(open)
+          if (!open) setEditingExpense(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Gas Expense</DialogTitle>
+            <DialogDescription>Update expense details.</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleUpdateExpense} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-category">Category</Label>
+              <select
+                id="edit-category"
+                value={editFormData.category}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="cylinder_repair">Cylinder Repair</option>
+                <option value="safety_inspection">Safety Inspection</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-amount">Amount</Label>
+              <Input
+                id="edit-amount"
+                type="number"
+                min="1"
+                value={editFormData.amount}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, amount: e.target.value }))}
+                placeholder="e.g. 25000"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Input
+                id="edit-description"
+                value={editFormData.description}
+                onChange={(e) => setEditFormData((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="Brief description"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditExpenseOpen(false)} disabled={isSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                {isSubmitting ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
           </form>

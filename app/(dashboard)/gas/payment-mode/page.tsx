@@ -47,25 +47,34 @@ export default function GasPaymentModePage() {
       if (isOwner) {
         const allBranches = await apiService.getBranches()
         const gasBranches = Array.isArray(allBranches) ? allBranches.filter(branch => branch.type === 'gas') : []
-        const targetBranchIds = businessFilter === 'all' 
-          ? gasBranches.map(b => b.id) 
-          : [businessFilter] // businessFilter contains the specific branch ID
-        const [salesResponses, expenseResponses] = await Promise.all([
-          Promise.all(
-            targetBranchIds.map(async (branchId) => {
-              const list = await apiService.getGasSales(branchId)
-              return Array.isArray(list) ? list : []
-            }),
-          ),
-          Promise.all(
-            targetBranchIds.map(async (branchId) => {
-              const list = await apiService.getGasExpenses(branchId)
-              return Array.isArray(list) ? list : []
-            }),
-          ),
-        ])
-        setSalesTransactions(salesResponses.flat())
-        setExpenses(expenseResponses.flat())
+        
+        if (businessFilter === 'all') {
+          // When "All Gas Branches" is selected, load from all branches but keep them separate
+          const [salesResponses, expenseResponses] = await Promise.all([
+            Promise.all(
+              gasBranches.map(async (branch) => {
+                const list = await apiService.getGasSales(branch.id)
+                return Array.isArray(list) ? list : []
+              }),
+            ),
+            Promise.all(
+              gasBranches.map(async (branch) => {
+                const list = await apiService.getGasExpenses(branch.id)
+                return Array.isArray(list) ? list : []
+              }),
+            ),
+          ])
+          setSalesTransactions(salesResponses.flat())
+          setExpenses(expenseResponses.flat())
+        } else {
+          // When specific branch is selected, load only from that branch
+          const [salesList, expenseList] = await Promise.all([
+            apiService.getGasSales(businessFilter),
+            apiService.getGasExpenses(businessFilter),
+          ])
+          setSalesTransactions(Array.isArray(salesList) ? salesList : [])
+          setExpenses(Array.isArray(expenseList) ? expenseList : [])
+        }
       } else {
         const fallbackBranchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
         if (!fallbackBranchId) {
@@ -158,8 +167,8 @@ export default function GasPaymentModePage() {
   const totalSalesMinusExpense = totalSales - totalExpenses
 
   const formatMoneyShort = (amount: number) => {
-    if (amount >= 1000000) return `₦${(amount / 1000000).toFixed(2)}M`
-    if (amount >= 1000) return `₦${(amount / 1000).toFixed(1)}K`
+    if (amount >= 1000000) return `₦${(amount / 1000000).toFixed(2).replace('.', ',')}M`
+    if (amount >= 1000) return `₦${(amount / 1000).toFixed(1).replace('.', ',')}K`
     return `₦${amount.toLocaleString()}`
   }
 
@@ -205,11 +214,22 @@ export default function GasPaymentModePage() {
       return
     }
 
-    const branchId = isOwner
-      ? selectedBranchId ?? branches[0]?.id
-      : selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
+    // Determine which branch to record payment to
+    let targetBranchId
+    if (isOwner) {
+      if (businessFilter === 'all') {
+        toast({
+          title: 'Select specific branch',
+          description: 'Please select a specific branch to record payment.',
+        })
+        return
+      }
+      targetBranchId = businessFilter
+    } else {
+      targetBranchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id
+    }
 
-    if (!branchId) {
+    if (!targetBranchId) {
       toast({
         title: 'Missing branch',
         description: 'Select a branch before recording payment.',
@@ -220,7 +240,7 @@ export default function GasPaymentModePage() {
     setIsSubmitting(true)
     try {
       await apiService.createGasSale({
-        branch_id: branchId,
+        branch_id: targetBranchId,
         type: 'sale',
         cylinder_size: '0kg',
         quantity: 0,

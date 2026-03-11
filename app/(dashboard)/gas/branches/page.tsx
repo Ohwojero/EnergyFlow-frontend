@@ -137,25 +137,35 @@ export default function GasBranchesPage() {
         .filter((cyl) => belongsToSelectedBranch(cyl))
         .reduce((sum, cyl) => sum + Number(cyl.quantity ?? 0) * Number(cyl.selling_price ?? 0), 0)
     : 0
-  const branchSalesValue = selectedBranch
-    ? gasSalesTransactions
-        .filter((t) => belongsToSelectedBranch(t))
-        .reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
-    : 0
+  
   const branchTransactions = useMemo(() => {
     if (!selectedBranch) return []
     return gasSalesTransactions
-      .filter((transaction) => belongsToSelectedBranch(transaction))
+      .filter((transaction) => {
+        if (!belongsToSelectedBranch(transaction)) return false
+        // Parse notes to get salesperson and exclude payment records
+        const notes = String(transaction.notes ?? '').toLowerCase()
+        if (notes.includes('type:payment_record')) return false
+        
+        const salespersonMatch = String(transaction.notes ?? '').match(/salesperson:([^|]+)/)
+        const salesperson = salespersonMatch ? salespersonMatch[1].trim().toLowerCase() : ''
+        // Only include sales_staff transactions, exclude manager transactions
+        return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
+      })
       .sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
   }, [selectedBranch, gasSalesTransactions])
+  
+  const branchSalesValue = selectedBranch
+    ? branchTransactions.reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
+    : 0
   const branchTransactionCount = branchTransactions.length
-  const branchTransactionsByMonth = useMemo(() => {
+  const branchTransactionsByDay = useMemo(() => {
     const groups: Record<string, any[]> = {}
     branchTransactions.forEach((t) => {
       const createdAt = t?.created_at ? new Date(t.created_at) : new Date()
-      const key = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, '0')}`
+      const key = createdAt.toISOString().slice(0, 10) // YYYY-MM-DD format
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
@@ -435,28 +445,28 @@ export default function GasBranchesPage() {
           {selectedBranch && (
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Branch</p>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-emerald-600 uppercase tracking-wide font-semibold">Branch</p>
                   <p className="text-base font-semibold text-foreground">{selectedBranch.name}</p>
                   <p className="text-sm text-muted-foreground">{selectedBranch.location}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Manager</p>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-emerald-600 uppercase tracking-wide font-semibold">Manager</p>
                   <p className="text-base font-semibold text-foreground">{getManagerName(selectedBranch)}</p>
                   <p className="text-sm text-muted-foreground capitalize">{selectedBranch.status}</p>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Sales</p>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-emerald-600 uppercase tracking-wide font-semibold">Sales</p>
                   <p className="text-lg font-semibold text-foreground">₦{branchSalesValue.toLocaleString()}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Inventory</p>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-emerald-600 uppercase tracking-wide font-semibold">Inventory</p>
                   <p className="text-lg font-semibold text-foreground">₦{branchInventoryValue.toLocaleString()}</p>
                 </div>
-                <div className="rounded-lg border border-border/60 p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Transactions</p>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-xs text-emerald-600 uppercase tracking-wide font-semibold">Transactions</p>
                   <p className="text-lg font-semibold text-foreground">{branchTransactionCount.toLocaleString()}</p>
                 </div>
               </div>
@@ -471,19 +481,23 @@ export default function GasBranchesPage() {
                         <div className="px-1 py-4 text-sm text-muted-foreground">No transactions yet.</div>
                       ) : (
                         <div className="space-y-4">
-                          {branchTransactionsByMonth.map(([monthKey, monthItems]) => {
-                            const monthDate = new Date(`${monthKey}-01`)
-                            const monthLabel = monthDate.toLocaleDateString('en-NG', {
+                          {branchTransactionsByDay.map(([dayKey, dayItems]) => {
+                            const dayDate = new Date(dayKey)
+                            const dayLabel = dayDate.toLocaleDateString('en-NG', {
+                              weekday: 'long',
+                              day: 'numeric',
                               month: 'long',
                               year: 'numeric',
                             })
+                            const dayTotal = dayItems.reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
                             return (
-                              <div key={monthKey} className="rounded-md border border-border/60">
-                                <div className="px-3 py-2 border-b border-border/60 bg-muted/30 text-xs font-semibold text-muted-foreground">
-                                  {monthLabel}
+                              <div key={dayKey} className="rounded-md border border-border/60">
+                                <div className="px-3 py-2 border-b border-border/60 bg-muted/30 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                                  <span>{dayLabel}</span>
+                                  <span>{dayItems.length} transactions • ₦{dayTotal.toLocaleString()}</span>
                                 </div>
                                 <div className="divide-y divide-border/60">
-                                  {monthItems.slice(0, 5).map((t) => {
+                                  {dayItems.map((t) => {
                                     const qty = Number(t?.quantity ?? 0)
                                     const recordedSize = String(t?.cylinder_size ?? t?.size ?? '').trim()
                                     const itemSize = qty > 0 ? `${qty}kg` : recordedSize || 'Gas Sale'
@@ -493,7 +507,15 @@ export default function GasBranchesPage() {
                                           <span className="font-medium text-foreground">{itemSize}</span>
                                           <span className="text-foreground">₦{Number(t.amount ?? 0).toLocaleString()}</span>
                                         </div>
-                                        <p className="text-xs text-muted-foreground capitalize">{t.type}</p>
+                                        <div className="flex items-center justify-between mt-1">
+                                          <p className="text-xs text-muted-foreground capitalize">{t.type}</p>
+                                          <p className="text-xs text-muted-foreground">
+                                            {new Date(t.created_at).toLocaleTimeString('en-NG', {
+                                              hour: '2-digit',
+                                              minute: '2-digit',
+                                            })}
+                                          </p>
+                                        </div>
                                       </div>
                                     )
                                   })}

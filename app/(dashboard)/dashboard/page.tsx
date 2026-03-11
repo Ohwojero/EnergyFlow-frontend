@@ -84,6 +84,17 @@ export default function DashboardPage() {
 
         const gasRevenueMap: Record<string, number> = {}
         let totalGasManagerSales = 0
+        const today = new Date()
+        const isSameLocalDay = (value: string | Date, today: Date) => {
+          const date = new Date(value)
+          if (Number.isNaN(date.getTime())) return false
+          return (
+            date.getFullYear() === today.getFullYear() &&
+            date.getMonth() === today.getMonth() &&
+            date.getDate() === today.getDate()
+          )
+        }
+        
         gasBranches.forEach((branch: any, index: number) => {
           const list = Array.isArray(gasSalesLists[index]) ? gasSalesLists[index] : []
           
@@ -93,25 +104,27 @@ export default function DashboardPage() {
             return match ? match[1].trim().toLowerCase() : ''
           }
           
-          // Sales staff sales only
+          // Sales staff sales only (today's data)
           const salesStaffTotal = list
             .filter((tx: any) => {
               const salesperson = parseSalesperson(tx.notes)
               const notes = String(tx.notes ?? '').toLowerCase()
-              // Exclude payment records
+              // Exclude payment records and filter for today only
               return !notes.includes('type:payment_record') && 
+                     isSameLocalDay(tx.created_at, today) &&
                      (salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager'))
             })
             .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
           gasRevenueMap[branch.id] = salesStaffTotal
           
-          // Manager sales only
+          // Manager sales only (today's data)
           const managerTotal = list
             .filter((tx: any) => {
               const salesperson = parseSalesperson(tx.notes)
               const notes = String(tx.notes ?? '').toLowerCase()
-              // Exclude payment records
+              // Exclude payment records and filter for today only
               return !notes.includes('type:payment_record') && 
+                     isSameLocalDay(tx.created_at, today) &&
                      (salesperson.includes('manager') || salesperson === 'manager')
             })
             .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
@@ -224,8 +237,8 @@ export default function DashboardPage() {
   const totalRevenue = totalSales
   const monthlyGrowth = 18.5
   const formatMoneyShort = (amount: number) => {
-    if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
-    if (amount >= 1000) return `N${(amount / 1000).toFixed(1)}K`
+    if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2).replace('.', ',')}M`
+    if (amount >= 1000) return `N${(amount / 1000).toFixed(1).replace('.', ',')}K`
     return `N${amount.toLocaleString()}`
   }
 
@@ -350,32 +363,34 @@ export default function DashboardPage() {
 
           {showOperationsPanels && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
-                <div className="p-5 border-b border-border">
+              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all border-l-4 border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+                <div className="p-5 border-b border-border bg-blue-100/30 dark:bg-blue-900/10">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <Wind className="w-5 h-5 text-secondary" />
+                      <div className="p-2 bg-blue-500/20 rounded-lg">
+                        <Wind className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                      </div>
                       <h3 className="text-base font-semibold text-foreground">Gas Operations</h3>
                     </div>
                     <button
                       onClick={() => router.push('/gas/branches')}
-                      className="text-xs text-primary hover:underline font-medium"
+                      className="text-xs text-blue-600 hover:text-blue-700 hover:underline font-medium transition-colors"
                     >
                       View All →
                     </button>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
-                      <p className="text-base font-bold text-foreground">₦{(gasSales / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-blue-100/50 dark:bg-blue-900/20 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1 font-semibold">Sales</p>
+                      <p className="text-base font-bold text-foreground">₦{(gasSales / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
-                      <p className="text-base font-bold text-foreground">₦{(gasInventoryValue / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-blue-100/50 dark:bg-blue-900/20 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1 font-semibold">Inventory</p>
+                      <p className="text-base font-bold text-foreground">₦{(gasInventoryValue / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
-                      <p className="text-base font-bold text-green-600">₦{((gasSales * 0.3) / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-blue-100/50 dark:bg-blue-900/20 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1 font-semibold">Profit</p>
+                      <p className="text-base font-bold text-green-600">₦{((gasSales * 0.3) / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
                   </div>
                 </div>
@@ -384,17 +399,17 @@ export default function DashboardPage() {
                     {gasBranches.map((branch) => (
                       <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
                         <div className="flex items-center gap-2 flex-1">
-                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
                             <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-foreground">₦{((gasBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0)}K</span>
+                          <span className="text-xs font-semibold text-foreground">₦{((gasBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0).replace('.', ',')}K</span>
                           <button
                             onClick={() => router.push('/gas/inventory')}
-                            className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
+                            className="opacity-0 group-hover:opacity-100 text-xs text-blue-600 transition-opacity"
                           >
                             →
                           </button>
@@ -405,32 +420,34 @@ export default function DashboardPage() {
                 </div>
               </Card>
 
-              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all">
-                <div className="p-5 border-b border-border">
+              <Card className="overflow-hidden shadow-card hover:shadow-card-hover transition-all border-l-4 border-l-orange-500 bg-orange-50/50 dark:bg-orange-950/20">
+                <div className="p-5 border-b border-border bg-orange-100/30 dark:bg-orange-900/10">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <Fuel className="w-5 h-5 text-orange-500" />
+                      <div className="p-2 bg-orange-500/20 rounded-lg">
+                        <Fuel className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                      </div>
                       <h3 className="text-base font-semibold text-foreground">Fuel Operations</h3>
                     </div>
                     <button
                       onClick={() => router.push('/fuel/branches')}
-                      className="text-xs text-primary hover:underline font-medium"
+                      className="text-xs text-orange-600 hover:text-orange-700 hover:underline font-medium transition-colors"
                     >
                       View All →
                     </button>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sales</p>
-                      <p className="text-base font-bold text-foreground">₦{(fuelSales / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-orange-100/50 dark:bg-orange-900/20 rounded-lg border border-orange-200/50 dark:border-orange-800/50">
+                      <p className="text-[10px] text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-1 font-semibold">Sales</p>
+                      <p className="text-base font-bold text-foreground">₦{(fuelSales / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Inventory</p>
-                      <p className="text-base font-bold text-foreground">₦{(fuelInventoryValue / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-orange-100/50 dark:bg-orange-900/20 rounded-lg border border-orange-200/50 dark:border-orange-800/50">
+                      <p className="text-[10px] text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-1 font-semibold">Inventory</p>
+                      <p className="text-base font-bold text-foreground">₦{(fuelInventoryValue / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Profit</p>
-                      <p className="text-base font-bold text-green-600">₦{((fuelSales * 0.25) / 1000).toFixed(0)}K</p>
+                    <div className="p-3 bg-orange-100/50 dark:bg-orange-900/20 rounded-lg border border-orange-200/50 dark:border-orange-800/50">
+                      <p className="text-[10px] text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-1 font-semibold">Profit</p>
+                      <p className="text-base font-bold text-green-600">₦{((fuelSales * 0.25) / 1000).toFixed(0).replace('.', ',')}K</p>
                     </div>
                   </div>
                 </div>
@@ -439,17 +456,17 @@ export default function DashboardPage() {
                     {fuelBranches.map((branch) => (
                       <div key={branch.id} className="flex items-center justify-between p-2.5 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer group">
                         <div className="flex items-center gap-2 flex-1">
-                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                          <div className="w-1.5 h-1.5 bg-orange-500 rounded-full"></div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-foreground truncate">{branch.name}</p>
                             <p className="text-xs text-muted-foreground truncate">{branch.location}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-foreground">₦{((fuelBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0)}K</span>
+                          <span className="text-xs font-semibold text-foreground">₦{((fuelBranchRevenueMap[branch.id] ?? 0) / 1000).toFixed(0).replace('.', ',')}K</span>
                           <button
                             onClick={() => router.push('/fuel/inventory')}
-                            className="opacity-0 group-hover:opacity-100 text-xs text-primary transition-opacity"
+                            className="opacity-0 group-hover:opacity-100 text-xs text-orange-600 transition-opacity"
                           >
                             →
                           </button>
