@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { MetricCard } from '@/components/dashboard/metric-card'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { apiService } from '@/lib/api'
 import {
   Building2,
@@ -25,7 +26,7 @@ export default function SuperAdminDashboard() {
         apiService.getAdminActivityLogs(),
       ])
       setStats(dashboard)
-      setLogs(Array.isArray(activity) ? activity.slice(0, 5) : [])
+      setLogs(Array.isArray(activity) ? activity : [])
     }
     load()
   }, [])
@@ -34,6 +35,21 @@ export default function SuperAdminDashboard() {
   const activeTenants = stats?.active_tenants ?? 0
   const suspendedTenants = stats?.suspended_tenants ?? 0
   const totalRevenue = stats?.total_revenue ?? 0
+
+  // Group logs by date
+  const groupLogsByDate = (logs: any[]) => {
+    const groups: Record<string, any[]> = {}
+    logs.forEach((log) => {
+      const date = new Date(log.timestamp)
+      const key = date.toISOString().slice(0, 10) // YYYY-MM-DD
+      if (!groups[key]) groups[key] = []
+      groups[key].push(log)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const logGroups = groupLogsByDate(logs)
+  const todayKey = new Date().toISOString().slice(0, 10)
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
@@ -91,29 +107,60 @@ export default function SuperAdminDashboard() {
             Recent Activity
           </h3>
         </div>
-        <div className="divide-y divide-border">
-          {logs.map((log) => (
-            <div key={log.id} className="p-4 hover:bg-muted/50 transition-colors">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">{log.tenant?.name ?? 'System'}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{log.description}</p>
-                  {log.user?.name && (
-                    <p className="text-xs text-muted-foreground mt-1">by {log.user.name}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-          {logs.length === 0 && (
-            <div className="p-6 text-center text-muted-foreground">No activity yet.</div>
-          )}
-        </div>
+        
+        {logs.length === 0 ? (
+          <div className="p-6 text-center text-muted-foreground">No activity yet.</div>
+        ) : (
+          <Accordion type="multiple" defaultValue={[todayKey]} className="w-full">
+            {logGroups.map(([dayKey, dayLogs]) => {
+              const date = new Date(dayKey + 'T00:00:00')
+              const dayName = date.toLocaleDateString('en-NG', { 
+                weekday: 'long', 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric' 
+              })
+              
+              return (
+                <AccordionItem key={dayKey} value={dayKey} className="border-b">
+                  <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <span className="font-semibold">{dayName}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {dayLogs.length} activities
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="divide-y divide-border">
+                      {dayLogs.map((log) => (
+                        <div key={log.id} className="p-4 hover:bg-muted/50 transition-colors">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="font-medium text-foreground">{log.tenant?.name ?? 'System'}</p>
+                              <p className="text-sm text-muted-foreground mt-1">{log.description}</p>
+                              {log.user?.name && (
+                                <p className="text-xs text-muted-foreground mt-1">by {log.user.name}</p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(log.timestamp).toLocaleTimeString('en-NG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            })}
+          </Accordion>
+        )}
       </Card>
     </div>
   )

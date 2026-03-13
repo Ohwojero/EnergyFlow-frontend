@@ -114,7 +114,7 @@ export default function TenantsPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-blue-100 dark:bg-blue-900/20 border-0">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Total Tenants</p>
@@ -123,7 +123,7 @@ export default function TenantsPage() {
             <Building2 className="w-8 h-8 text-primary opacity-50" />
           </div>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-green-100 dark:bg-green-900/20 border-0">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
@@ -134,7 +134,7 @@ export default function TenantsPage() {
             <CheckCircle className="w-8 h-8 text-green-600 opacity-50" />
           </div>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-red-100 dark:bg-red-900/20 border-0">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Suspended</p>
@@ -145,7 +145,7 @@ export default function TenantsPage() {
             <XCircle className="w-8 h-8 text-red-600 opacity-50" />
           </div>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-purple-100 dark:bg-purple-900/20 border-0">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">MRR</p>
@@ -305,3 +305,5 @@ export default function TenantsPage() {
     </div>
   )
 }
+
+

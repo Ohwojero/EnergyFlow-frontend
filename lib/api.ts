@@ -113,6 +113,10 @@ class ApiService {
     return this.request(`/tenant/${id}`)
   }
 
+  async getMyTenant() {
+    return this.request('/tenant/me')
+  }
+
   async updateTenant(id: string, data: any) {
     return this.request(`/tenant/${id}`, {
       method: 'PUT',

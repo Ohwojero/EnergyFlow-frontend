@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { apiService } from '@/lib/api'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
   Activity,
   Search,
@@ -20,11 +21,21 @@ export default function ActivityLogsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [actionFilter, setActionFilter] = useState<string>('all')
   const [logs, setLogs] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     const load = async () => {
-      const data = await apiService.getAdminActivityLogs()
-      setLogs(Array.isArray(data) ? data : [])
+      try {
+        setError('')
+        const data = await apiService.getAdminActivityLogs()
+        setLogs(Array.isArray(data) ? data : [])
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load activity logs')
+        setLogs([])
+      } finally {
+        setIsLoading(false)
+      }
     }
     load()
   }, [])
@@ -39,6 +50,16 @@ export default function ActivityLogsPage() {
     const matchesAction = actionFilter === 'all' || log.action === actionFilter
     return matchesSearch && matchesAction
   })
+
+  const groupedLogs = useMemo(() => {
+    const groups: Record<string, any[]> = {}
+    filteredLogs.forEach((log) => {
+      const key = new Date(log.timestamp).toDateString()
+      if (!groups[key]) groups[key] = []
+      groups[key].push(log)
+    })
+    return Object.entries(groups).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+  }, [filteredLogs])
 
   const getActionIcon = (action: string) => {
     switch (action) {
@@ -107,23 +128,33 @@ export default function ActivityLogsPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-blue-100 dark:bg-blue-900/20 border-0">
           <p className="text-sm text-muted-foreground mb-1">Total Events</p>
           <p className="text-2xl font-bold text-foreground">{logs.length}</p>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-green-100 dark:bg-green-900/20 border-0">
           <p className="text-sm text-muted-foreground mb-1">Today</p>
           <p className="text-2xl font-bold text-foreground">{totalToday}</p>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-purple-100 dark:bg-purple-900/20 border-0">
           <p className="text-sm text-muted-foreground mb-1">This Week</p>
           <p className="text-2xl font-bold text-foreground">{totalWeek}</p>
         </Card>
-        <Card className="p-4 shadow-card">
+        <Card className="p-4 shadow-card bg-red-100 dark:bg-red-900/20 border-0">
           <p className="text-sm text-muted-foreground mb-1">Critical Events</p>
           <p className="text-2xl font-bold text-red-600">{criticalCount}</p>
         </Card>
       </div>
+
+      {isLoading ? (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-muted-foreground">Loading activity logs...</p>
+        </Card>
+      ) : error ? (
+        <Card className="p-4 mb-6 shadow-card">
+          <p className="text-red-600">{error}</p>
+        </Card>
+      ) : null}
 
       {/* Filters */}
       <Card className="p-4 mb-6 shadow-card">
@@ -162,57 +193,72 @@ export default function ActivityLogsPage() {
         </div>
       </Card>
 
-      {/* Logs Table */}
+      {/* Logs Accordion */}
       <Card className="shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Timestamp</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Tenant</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">User</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Action</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
-                <th className="px-6 py-3 text-left font-semibold text-muted-foreground">IP Address</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredLogs.map((log) => {
-                const ActionIcon = getActionIcon(log.action)
-                return (
-                  <tr key={log.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                    <td className="px-6 py-4 text-muted-foreground whitespace-nowrap">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="font-medium text-foreground">{log.tenant?.name ?? '-'}</p>
-                    </td>
-                    <td className="px-6 py-4 text-foreground">{log.user?.name ?? '-'}</td>
-                    <td className="px-6 py-4">
-                      <Badge className={getActionColor(log.action)}>
-                        <ActionIcon className="w-3 h-3 mr-1" />
-                        {String(log.action).replace(/_/g, ' ')}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 text-foreground">{log.description}</td>
-                    <td className="px-6 py-4 text-muted-foreground font-mono text-xs">
-                      {log.ip_address}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {filteredLogs.length === 0 && (
+        {filteredLogs.length === 0 ? (
           <div className="p-12 text-center">
             <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
             <h3 className="text-lg font-semibold text-foreground mb-2">No Logs Found</h3>
             <p className="text-muted-foreground">Try adjusting your search or filter criteria</p>
           </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={groupedLogs.length ? [groupedLogs[0][0]] : []}>
+            {groupedLogs.map(([dayKey, dayLogs]) => (
+              <AccordionItem key={dayKey} value={dayKey}>
+                <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <span className="font-semibold">{dayKey}</span>
+                    <span className="text-sm text-muted-foreground">{dayLogs.length} events</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Timestamp</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Tenant</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">User</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Action</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Description</th>
+                          <th className="px-6 py-3 text-left font-semibold text-muted-foreground">IP Address</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dayLogs.map((log) => {
+                          const ActionIcon = getActionIcon(log.action)
+                          return (
+                            <tr key={log.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                              <td className="px-6 py-4 text-muted-foreground whitespace-nowrap">
+                                {new Date(log.timestamp).toLocaleString()}
+                              </td>
+                              <td className="px-6 py-4">
+                                <p className="font-medium text-foreground">{log.tenant?.name ?? '-'}</p>
+                              </td>
+                              <td className="px-6 py-4 text-foreground">{log.user?.name ?? '-'}</td>
+                              <td className="px-6 py-4">
+                                <Badge className={getActionColor(log.action)}>
+                                  <ActionIcon className="w-3 h-3 mr-1" />
+                                  {String(log.action).replace(/_/g, ' ')}
+                                </Badge>
+                              </td>
+                              <td className="px-6 py-4 text-foreground">{log.description}</td>
+                              <td className="px-6 py-4 text-muted-foreground font-mono text-xs">
+                                {log.ip_address}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
         )}
       </Card>
     </div>
   )
 }
+

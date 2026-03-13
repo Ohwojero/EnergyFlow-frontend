@@ -80,6 +80,8 @@ export function Sidebar() {
           const businessType = (user as any)?.business_type
           if (businessType === 'fuel') {
             items.push(
+              { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+              { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
               { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
               { label: 'Expense', href: '/fuel/expenses', icon: AlertCircle },
               { label: 'User', href: '/users', icon: Users },
@@ -87,6 +89,8 @@ export function Sidebar() {
             )
           } else {
             items.push(
+              { label: 'Inventory', href: '/gas/inventory', icon: Package },
+              { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
               { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
               { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
               { label: 'User', href: '/users', icon: Users },

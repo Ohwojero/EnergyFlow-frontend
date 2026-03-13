@@ -74,7 +74,7 @@ export default function BillingPage() {
           </p>
         </Card>
 
-        <Card className="p-6 shadow-card">
+        <Card className="p-6 shadow-card bg-blue-100 dark:bg-blue-900/20 border-0">
           <div className="flex items-center justify-between mb-4">
             <CheckCircle className="w-8 h-8 text-blue-600 dark:text-blue-400" />
           </div>
@@ -82,7 +82,7 @@ export default function BillingPage() {
           <p className="text-3xl font-bold text-foreground">{activeSubscriptions}</p>
         </Card>
 
-        <Card className="p-6 shadow-card">
+        <Card className="p-6 shadow-card bg-red-100 dark:bg-red-900/20 border-0">
           <div className="flex items-center justify-between mb-4">
             <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
           </div>
@@ -90,7 +90,7 @@ export default function BillingPage() {
           <p className="text-3xl font-bold text-red-600">{failedPayments}</p>
         </Card>
 
-        <Card className="p-6 shadow-card">
+        <Card className="p-6 shadow-card bg-purple-100 dark:bg-purple-900/20 border-0">
           <div className="flex items-center justify-between mb-4">
             <TrendingUp className="w-8 h-8 text-purple-600 dark:text-purple-400" />
           </div>
@@ -199,3 +199,4 @@ export default function BillingPage() {
     </div>
   )
 }
+

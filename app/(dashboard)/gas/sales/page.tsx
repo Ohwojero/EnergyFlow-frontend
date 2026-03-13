@@ -57,6 +57,7 @@ export default function GasSalesPage() {
   const isPersonalFuelOwner = isPersonalOwner && (user as any)?.business_type === 'fuel'
   const isManager = user?.role === 'gas_manager'
   const isSalesStaff = user?.role === 'sales_staff'
+  const isPersonalOwnerOnly = isPersonalOwner
   const canEditDelete = isOwner || isManager
 
   // Redirect personal fuel plan users to fuel sales
@@ -512,9 +513,11 @@ export default function GasSalesPage() {
             </p>
           )}
         </div>
-        <Button onClick={() => setIsRecordSaleOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
-          Record Sale
-        </Button>
+        {!isPersonalOwnerOnly && (
+          <Button onClick={() => setIsRecordSaleOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
+            Record Sale
+          </Button>
+        )}
       </div>
 
       {!isPersonalOwner && (isOwner || (userGasBranches.length > 1)) && (

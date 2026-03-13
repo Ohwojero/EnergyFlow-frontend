@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card'
 import { useAuth } from '@/context/auth-context'
 import { apiService } from '@/lib/api'
 import { RecentTransactions } from '@/components/dashboard/recent-transactions'
-import { Building2, DollarSign, Package, ShoppingCart, ArrowUpRight } from 'lucide-react'
+import { Building2, DollarSign, Package, ShoppingCart, ArrowUpRight, Users } from 'lucide-react'
 import { isSameLagosDay } from '@/lib/lagos-time'
 
 interface DashboardStats {
@@ -13,6 +13,7 @@ interface DashboardStats {
   managerSales: number
   totalInventory: number
   totalBranches: number
+  totalUsers: number
 }
 
 export default function PersonalOwnerDashboard() {
@@ -22,6 +23,7 @@ export default function PersonalOwnerDashboard() {
     managerSales: 0,
     totalInventory: 0,
     totalBranches: 0,
+    totalUsers: 0,
   })
   const [loading, setLoading] = useState(true)
 
@@ -32,8 +34,18 @@ export default function PersonalOwnerDashboard() {
       if (!user) return
       setLoading(true)
       try {
-        const branches = await apiService.getBranches().catch(() => [])
+        const [branches, users] = await Promise.all([
+          apiService.getBranches().catch(() => []),
+          apiService.getUsers().catch(() => [])
+        ])
         const branchList = Array.isArray(branches) ? branches : []
+        const userList = Array.isArray(users) ? users : []
+        
+        // Count users excluding the current owner
+        const totalUsers = userList.filter((u: any) => 
+          u.id !== user.id && 
+          (u.role === 'gas_manager' || u.role === 'fuel_manager' || u.role === 'sales_staff')
+        ).length
         const preferredType = selectedBranchType ?? businessType
         const selectedBranch = selectedBranchId
           ? branchList.find((b: any) => b.id === selectedBranchId)
@@ -42,7 +54,7 @@ export default function PersonalOwnerDashboard() {
             : branchList[0]
 
         if (!selectedBranch) {
-          setStats({ totalSales: 0, managerSales: 0, totalInventory: 0, totalBranches: branchList.length })
+          setStats({ totalSales: 0, managerSales: 0, totalInventory: 0, totalBranches: branchList.length, totalUsers })
           return
         }
 
@@ -87,6 +99,7 @@ export default function PersonalOwnerDashboard() {
             managerSales,
             totalInventory,
             totalBranches: branchList.length,
+            totalUsers,
           })
           return
         }
@@ -120,10 +133,11 @@ export default function PersonalOwnerDashboard() {
           managerSales,
           totalInventory,
           totalBranches: branchList.length,
+          totalUsers,
         })
       } catch (error) {
         console.error('Failed to load dashboard data:', error)
-        setStats({ totalSales: 0, managerSales: 0, totalInventory: 0, totalBranches: 0 })
+        setStats({ totalSales: 0, managerSales: 0, totalInventory: 0, totalBranches: 0, totalUsers: 0 })
       } finally {
         setLoading(false)
       }
@@ -195,12 +209,12 @@ export default function PersonalOwnerDashboard() {
         <Card className="p-6 bg-purple-100 dark:bg-purple-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="p-3 bg-purple-600/20 rounded-lg">
-              <Building2 className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+              <Users className="w-6 h-6 text-purple-600 dark:text-purple-400" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-1">Total Branches</p>
-          <h3 className="text-3xl font-bold text-foreground">{stats.totalBranches}</h3>
-          <p className="text-xs text-muted-foreground mt-2">Personal plan</p>
+          <p className="text-sm text-muted-foreground mb-1">Total Staff</p>
+          <h3 className="text-3xl font-bold text-foreground">{stats.totalUsers}</h3>
+          <p className="text-xs text-muted-foreground mt-2">Managers & Sales Staff</p>
         </Card>
 
         <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">

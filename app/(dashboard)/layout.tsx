@@ -35,7 +35,7 @@ export default function DashboardLayout({
     }
     let active = true
     apiService
-      .getTenantById(user.tenant_id)
+      .getMyTenant()
       .then((tenant) => {
         if (!active) return
         setTenantStatus({
