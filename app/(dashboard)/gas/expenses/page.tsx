@@ -10,6 +10,7 @@ import { toast } from '@/hooks/use-toast'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiService } from '@/lib/api'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import { useAuth } from '@/context/auth-context'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
@@ -173,19 +174,13 @@ export default function GasExpensesPage() {
     return match ? match[1].trim().toLowerCase() : ''
   }
 
-  const isSameLocalDay = (value: string | Date, today: Date) => {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return false
-    return (
-      date.getFullYear() === today.getFullYear() &&
-      date.getMonth() === today.getMonth() &&
-      date.getDate() === today.getDate()
-    )
-  }
-
-  const now = new Date()
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
   const totalExpenses = visibleExpenses
-    .filter((exp) => isSameLocalDay(exp.created_at, now))
+    .filter((exp) => isSameLagosDay(exp.created_at, now))
     .reduce((sum, exp) => sum + exp.amount, 0)
   
   // Sales staff sales only (today's data) - matching dashboard logic exactly
@@ -195,7 +190,7 @@ export default function GasExpensesPage() {
       const notes = String(sale.notes ?? '').toLowerCase()
       // Exclude payment records and filter for today only
       return !notes.includes('type:payment_record') && 
-             isSameLocalDay(sale.created_at, now) &&
+             isSameLagosDay(sale.created_at, now) &&
              (salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager'))
     })
     .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
@@ -205,7 +200,7 @@ export default function GasExpensesPage() {
     const groups: Record<string, ExpenseItem[]> = {}
     items.forEach((item) => {
       const date = new Date(item.created_at)
-      const key = date.toISOString().slice(0, 10)
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(item)
     })
@@ -213,7 +208,7 @@ export default function GasExpensesPage() {
   }
 
   const dayGroups = groupByDay(visibleExpenses)
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
 
   const getCategoryLabel = (category: string) => {
     return category.replace(/_/g, ' ').split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -237,6 +232,7 @@ export default function GasExpensesPage() {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      timeZone: 'Africa/Lagos',
     })
   }
 
@@ -451,7 +447,7 @@ export default function GasExpensesPage() {
           <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
             {dayGroups.map(([dayKey, dayExpenses]) => {
               const date = new Date(dayKey)
-              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
               const dayTotal = dayExpenses.reduce((sum, expense) => sum + expense.amount, 0)
 
               return (
@@ -484,6 +480,7 @@ export default function GasExpensesPage() {
                                 {new Date(expense.created_at).toLocaleTimeString('en-NG', {
                                   hour: '2-digit',
                                   minute: '2-digit',
+                                  timeZone: 'Africa/Lagos',
                                 })}
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.branch_name || '-'}</td>

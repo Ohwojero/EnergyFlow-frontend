@@ -16,8 +16,7 @@ export function SubscriptionReminder() {
     const dayOfMonth = today.getDate()
     
     // Show reminder on days 27, 28, 29 of any month
-    // Temporarily show for testing - remove this line later
-    if ((dayOfMonth >= 27 && dayOfMonth <= 29) || true) {
+    if (dayOfMonth >= 27 && dayOfMonth <= 29) {
       if (user?.role !== 'super_admin') {
         setIsVisible(true)
       }

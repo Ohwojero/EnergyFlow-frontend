@@ -10,6 +10,7 @@ import { toast } from '@/hooks/use-toast'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiService } from '@/lib/api'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import { useAuth } from '@/context/auth-context'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
@@ -77,13 +78,33 @@ export default function ExpensesPage() {
     return expenses.filter((expense) => String(expense.branch_id ?? '') === localSelectedBranchId)
   }, [expenses, isOwner, localSelectedBranchId])
 
-  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0)
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const totalExpenses = visibleExpenses
+    .filter((exp) => isSameLagosDay(exp.created_at, todayKey))
+    .reduce((sum, exp) => sum + exp.amount, 0)
 
   const groupByMonth = (items: ExpenseItem[]) => {
     const groups: Record<string, ExpenseItem[]> = {}
     items.forEach((item) => {
-      const date = new Date(item.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const key = toLagosDateKey(item.created_at).slice(0, 7)
+      if (!groups[key]) groups[key] = []
+      groups[key].push(item)
+    })
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  const groupByDay = (items: ExpenseItem[]) => {
+    const groups: Record<string, ExpenseItem[]> = {}
+    items.forEach((item) => {
+      const key = toLagosDateKey(item.created_at)
       if (!groups[key]) groups[key] = []
       groups[key].push(item)
     })
@@ -91,7 +112,9 @@ export default function ExpensesPage() {
   }
 
   const monthGroups = groupByMonth(visibleExpenses)
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const dayGroups = groupByDay(visibleExpenses)
+  const currentMonth = todayKey.slice(0, 7)
+  const currentDay = todayKey
 
   const loadExpenses = async () => {
     setIsLoading(true)
@@ -230,6 +253,7 @@ export default function ExpensesPage() {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      timeZone: 'Africa/Lagos',
     })
   }
 
@@ -368,19 +392,21 @@ export default function ExpensesPage() {
             <p className="text-muted-foreground">No expenses recorded yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[currentMonth]} className="w-full">
-            {monthGroups.map(([monthKey, monthExpenses]) => {
-              const date = new Date(monthKey + '-01')
-              const monthName = date.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })
-              const monthTotal = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+          <Accordion type="multiple" defaultValue={[isOwner ? currentDay : currentMonth]} className="w-full">
+            {(isOwner ? dayGroups : monthGroups).map(([groupKey, groupExpenses]) => {
+              const groupDate = isOwner ? new Date(`${groupKey}T00:00:00`) : new Date(groupKey + '-01')
+              const groupLabel = isOwner
+                ? groupDate.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
+                : groupDate.toLocaleDateString('en-NG', { month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
+              const groupTotal = groupExpenses.reduce((sum, expense) => sum + expense.amount, 0)
 
               return (
-                <AccordionItem key={monthKey} value={monthKey} className="border-b">
+                <AccordionItem key={groupKey} value={groupKey} className="border-b">
                   <AccordionTrigger className="px-6 py-4 hover:bg-muted/50">
                     <div className="flex items-center justify-between w-full pr-4">
-                      <span className="font-semibold">{monthName}</span>
+                      <span className="font-semibold">{groupLabel}</span>
                       <span className="text-sm text-muted-foreground">
-                        {monthExpenses.length} expenses • N{monthTotal.toLocaleString()}
+                        {groupExpenses.length} expenses • N{groupTotal.toLocaleString()}
                       </span>
                     </div>
                   </AccordionTrigger>
@@ -398,7 +424,7 @@ export default function ExpensesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {monthExpenses.map((expense) => (
+                          {groupExpenses.map((expense) => (
                             <tr key={expense.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                               <td className="px-6 py-4 text-foreground">{formatDate(expense.created_at)}</td>
                               <td className="px-6 py-4 text-foreground">{expense.source}</td>

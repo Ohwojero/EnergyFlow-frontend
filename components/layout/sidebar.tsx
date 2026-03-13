@@ -27,6 +27,8 @@ export function Sidebar() {
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({})
   const sidebarTitle = user?.tenant_name || user?.name || 'EnergyFlow'
   const sidebarSubtitle = user?.tenant_name ? 'Business Account' : 'Management System'
+  const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const personalBusinessType = (user as any)?.business_type
 
   useEffect(() => {
     apiService.getBranches().then((data) => {
@@ -36,10 +38,13 @@ export function Sidebar() {
     })
   }, [])
 
-  const currentBranch = useMemo(
-    () => branches.find((b) => b.id === selectedBranchId),
-    [branches, selectedBranchId]
-  )
+  const currentBranch = useMemo(() => {
+    if (isPersonalOwner && personalBusinessType) {
+      const matched = branches.find((b) => String(b.type) === String(personalBusinessType))
+      if (matched) return matched
+    }
+    return branches.find((b) => b.id === selectedBranchId)
+  }, [branches, selectedBranchId, isPersonalOwner, personalBusinessType])
 
   if (!user) return null
 
@@ -53,9 +58,10 @@ export function Sidebar() {
     const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
 
     if (user.role !== 'sales_staff') {
+      const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
       items.push({
         label: 'Dashboard',
-        href: '/dashboard',
+        href: isPersonalOwner ? '/owner-dashboard' : '/dashboard',
         icon: LayoutDashboard,
       })
     }
@@ -71,14 +77,22 @@ export function Sidebar() {
 
       case 'org_owner':
         if (isPersonalOwner) {
-          items.push(
-            { label: 'Inventory', href: '/gas/inventory', icon: Package },
-            { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
-            { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
-            { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
-            { label: 'User', href: '/users', icon: Users },
-            { label: 'Reports', href: '/reports', icon: FileText },
-          )
+          const businessType = (user as any)?.business_type
+          if (businessType === 'fuel') {
+            items.push(
+              { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
+              { label: 'Expense', href: '/fuel/expenses', icon: AlertCircle },
+              { label: 'User', href: '/users', icon: Users },
+              { label: 'Reports', href: '/reports', icon: FileText },
+            )
+          } else {
+            items.push(
+              { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
+              { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
+              { label: 'User', href: '/users', icon: Users },
+              { label: 'Reports', href: '/reports', icon: FileText },
+            )
+          }
           break
         }
 
@@ -209,7 +223,9 @@ export function Sidebar() {
         <div className="px-6 py-3 bg-sidebar-primary/10 border-b border-sidebar-border">
           <p className="text-xs text-sidebar-foreground/60 uppercase tracking-wide">Current Branch</p>
           <p className="font-semibold text-sm mt-1">{currentBranch.name}</p>
-          <p className="text-xs text-sidebar-foreground/50">{currentBranch.type.toUpperCase()}</p>
+          <p className="text-xs text-sidebar-foreground/50">
+            {(isPersonalOwner && personalBusinessType ? personalBusinessType : currentBranch.type).toUpperCase()}
+          </p>
         </div>
       )}
 

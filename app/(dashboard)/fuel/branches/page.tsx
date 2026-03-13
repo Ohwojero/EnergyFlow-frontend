@@ -28,6 +28,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
 import { useAuth } from '@/context/auth-context'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import {
   Archive,
   Eye,
@@ -137,29 +138,38 @@ export default function FuelBranchesPage() {
         .filter((product) => belongsToSelectedBranch(product))
         .reduce((sum, product) => sum + Number(product.total_value ?? 0), 0)
     : 0
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
   const branchSalesValue = selectedBranch
     ? shiftReconciliations
         .filter((shift) => {
           if (!belongsToSelectedBranch(shift)) return false
           const role = String(shift.created_by_role ?? '').trim().toLowerCase()
-          return role === 'sales_staff'
+          return role === 'sales_staff' && isSameLagosDay(shift.created_at, todayKey)
         })
         .reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
     : 0
   const branchShifts = selectedBranch
     ? shiftReconciliations.filter((shift) => {
         if (!belongsToSelectedBranch(shift)) return false
-        // Only show sales_staff shifts in Recent Shifts, just like gas branches
         const role = String(shift.created_by_role ?? '').trim().toLowerCase()
         return role === 'sales_staff' || role === 'salesstaff'
       })
     : []
+  const todayBranchShifts = branchShifts.filter((shift) => isSameLagosDay(shift.created_at, todayKey))
 
   const branchShiftsByDay = useMemo(() => {
     const groups: Record<string, any[]> = {}
     branchShifts.forEach((shift) => {
       const createdAt = shift?.created_at ? new Date(shift.created_at) : new Date()
-      const key = createdAt.toISOString().slice(0, 10) // YYYY-MM-DD format
+      const key = toLagosDateKey(createdAt)
       if (!groups[key]) groups[key] = []
       groups[key].push(shift)
     })
@@ -461,7 +471,7 @@ export default function FuelBranchesPage() {
                 </div>
                 <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
                   <p className="text-xs text-orange-600 uppercase tracking-wide font-semibold">Shifts</p>
-                  <p className="text-lg font-semibold text-foreground">{branchShifts.length}</p>
+                  <p className="text-lg font-semibold text-foreground">{todayBranchShifts.length}</p>
                 </div>
               </div>
               <div className="rounded-lg border border-border/60 px-4">
@@ -482,6 +492,7 @@ export default function FuelBranchesPage() {
                               day: 'numeric',
                               month: 'long',
                               year: 'numeric',
+                              timeZone: 'Africa/Lagos',
                             })
                             const dayTotal = dayShifts.reduce((sum, shift) => sum + Number(shift.sales_amount ?? 0), 0)
                             return (
@@ -505,6 +516,7 @@ export default function FuelBranchesPage() {
                                           {new Date(shift.created_at).toLocaleTimeString('en-NG', {
                                             hour: '2-digit',
                                             minute: '2-digit',
+                                            timeZone: 'Africa/Lagos',
                                           })}
                                         </p>
                                       </div>

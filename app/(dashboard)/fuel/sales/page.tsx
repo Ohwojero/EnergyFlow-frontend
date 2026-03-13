@@ -11,6 +11,7 @@ import { toast } from '@/hooks/use-toast'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import type { Branch, ShiftReconciliation } from '@/types'
 import { apiService } from '@/lib/api'
+import { getLagosTimeHHMM, isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import {
   Dialog,
   DialogContent,
@@ -40,11 +41,32 @@ export default function FuelSalesPage() {
   const currentUserId = String((user as any)?.id ?? (user as any)?.user_id ?? '').trim()
   const currentUserRole = String(user?.role ?? '').trim().toLowerCase()
   const isOwner = user?.role === 'org_owner'
+  const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
+  const isPersonalGasOwner = isPersonalOwner && (user as any)?.business_type === 'gas'
   const isFuelManager = user?.role === 'fuel_manager'
   const canCreatePumpInline = user?.role === 'org_owner' || user?.role === 'fuel_manager'
   const canEditReconciliation =
     user?.role === 'org_owner' || user?.role === 'fuel_manager' || user?.role === 'sales_staff'
   const canDeleteReconciliation = user?.role === 'org_owner' || user?.role === 'fuel_manager'
+
+  // Redirect personal gas plan users to gas sales since they don't have fuel operations
+  useEffect(() => {
+    if (isPersonalGasOwner) {
+      window.location.href = '/gas/sales'
+      return
+    }
+  }, [isPersonalGasOwner])
+
+  // Don't render anything for personal gas plan users while redirecting
+  if (isPersonalGasOwner) {
+    return (
+      <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">Redirecting to Gas Sales...</p>
+        </div>
+      </div>
+    )
+  }
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [branchUsers, setBranchUsers] = useState<Array<{ id: string; name: string; role: string }>>([])
@@ -70,8 +92,8 @@ export default function FuelSalesPage() {
     start_reading: '0',
     end_reading: '0',
     price_per_litre: '',
-    date: new Date().toISOString().slice(0, 10),
-    time: new Date().toTimeString().slice(0, 5),
+    date: toLagosDateKey(),
+    time: getLagosTimeHHMM(),
   })
   const [editFormData, setEditFormData] = useState({
     shift_number: '',
@@ -80,11 +102,17 @@ export default function FuelSalesPage() {
     sales_amount: '',
   })
 
+
+
   const userFuelBranches = useMemo(
     () => branches.filter((branch) => user?.assigned_branches?.includes(branch.id)),
     [branches, user?.assigned_branches],
   )
   const activeFuelBranchId = useMemo(() => {
+    // For personal plan users, use the first available branch
+    if (isPersonalOwner && branches.length > 0) {
+      return branches[0].id
+    }
     if (selectedBranchId && branches.some((branch) => branch.id === selectedBranchId)) {
       return selectedBranchId
     }
@@ -92,20 +120,28 @@ export default function FuelSalesPage() {
       branches.some((branch) => branch.id === id),
     )
     return assignedFuelBranchId ?? branches[0]?.id ?? null
-  }, [branches, selectedBranchId, user?.assigned_branches])
+  }, [branches, selectedBranchId, user?.assigned_branches, isPersonalOwner])
 
   const currentBranchInfo = useMemo(() => {
     const branchId = isOwner ? localSelectedBranchId : activeFuelBranchId
     return branchId ? branches.find((branch) => branch.id === branchId) : null
   }, [activeFuelBranchId, branches, isOwner, localSelectedBranchId])
 
-  const recordBranchId = useMemo(
-    () =>
-      isOwner
-        ? localSelectedBranchId
-        : activeFuelBranchId,
-    [activeFuelBranchId, isOwner, localSelectedBranchId],
-  )
+  const recordBranchId = useMemo(() => {
+    if (isPersonalOwner) {
+      // Personal plan users should use their single branch with fallback chain
+      const branchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id ?? null
+      return branchId
+    }
+    
+    // For fuel managers and other non-owners, use the same fallback logic as gas sales
+    if (!isOwner) {
+      const branchId = selectedBranchId ?? user?.assigned_branches?.[0] ?? branches[0]?.id ?? null
+      return branchId
+    }
+    
+    return localSelectedBranchId
+  }, [activeFuelBranchId, isOwner, localSelectedBranchId, isPersonalOwner, branches, selectedBranchId, user?.assigned_branches, user?.role])
 
   const normalizeShift = (raw: any, fallbackBranchId?: string): ShiftEntry => ({
     id: raw.id,
@@ -137,11 +173,6 @@ export default function FuelSalesPage() {
     return pumpId || 'N/A'
   }
 
-  const isSameLocalDay = (dateA: Date, dateB: Date) =>
-    dateA.getFullYear() === dateB.getFullYear() &&
-    dateA.getMonth() === dateB.getMonth() &&
-    dateA.getDate() === dateB.getDate()
-
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000)
     return () => clearInterval(timer)
@@ -154,9 +185,15 @@ export default function FuelSalesPage() {
         let fuelList = Array.isArray(data) ? data : []
         if (fuelList.length === 0) {
           const allBranches = await apiService.getBranches().catch(() => [])
-          fuelList = (Array.isArray(allBranches) ? allBranches : []).filter(
-            (branch: any) => String(branch?.type ?? '').toLowerCase() === 'fuel',
-          )
+          if (isPersonalOwner) {
+            // Personal plan users can use any branch type since they only have one
+            fuelList = Array.isArray(allBranches) ? allBranches : []
+          } else {
+            // Other users should only see fuel branches
+            fuelList = (Array.isArray(allBranches) ? allBranches : []).filter(
+              (branch: any) => String(branch?.type ?? '').toLowerCase() === 'fuel',
+            )
+          }
         }
         setBranches(fuelList)
       } catch {
@@ -167,7 +204,7 @@ export default function FuelSalesPage() {
       }
     }
     loadBranches()
-  }, [])
+  }, [isPersonalOwner])
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -245,7 +282,7 @@ export default function FuelSalesPage() {
             .flat()
             .reduce((sum, row: any) => {
               const createdAt = new Date(String(row?.created_at ?? ''))
-              if (!Number.isNaN(createdAt.getTime()) && isSameLocalDay(createdAt, now)) {
+              if (!Number.isNaN(createdAt.getTime()) && isSameLagosDay(createdAt, now)) {
                 return sum + Number(row?.amount ?? 0)
               }
               return sum
@@ -261,7 +298,7 @@ export default function FuelSalesPage() {
         const list = await apiService.getFuelExpenses(activeFuelBranchId).catch(() => [])
         const total = (Array.isArray(list) ? list : []).reduce((sum, row: any) => {
           const createdAt = new Date(String(row?.created_at ?? ''))
-          if (!Number.isNaN(createdAt.getTime()) && isSameLocalDay(createdAt, now)) {
+          if (!Number.isNaN(createdAt.getTime()) && isSameLagosDay(createdAt, now)) {
             return sum + Number(row?.amount ?? 0)
           }
           return sum
@@ -373,7 +410,7 @@ export default function FuelSalesPage() {
     () =>
       salesMetricShifts.filter((shift) => {
         const createdAt = new Date(shift.created_at)
-        return !Number.isNaN(createdAt.getTime()) && isSameLocalDay(createdAt, now)
+        return !Number.isNaN(createdAt.getTime()) && isSameLagosDay(createdAt, now)
       }),
     [now, salesMetricShifts],
   )
@@ -401,13 +438,14 @@ export default function FuelSalesPage() {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Africa/Lagos',
     })
 
   const groupByDay = (entries: ShiftEntry[]) => {
     const groups: Record<string, ShiftEntry[]> = {}
     entries.forEach((entry) => {
       const date = new Date(entry.created_at)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(entry)
     })
@@ -415,7 +453,7 @@ export default function FuelSalesPage() {
   }
 
   const dayGroups = groupByDay(shifts)
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
 
   const resetForm = () => {
     setNewPumpNumber('')
@@ -426,8 +464,8 @@ export default function FuelSalesPage() {
       start_reading: String(shifts[0]?.end_reading ?? 0),
       end_reading: String(shifts[0]?.end_reading ?? 0),
       price_per_litre: '',
-      date: new Date().toISOString().slice(0, 10),
-      time: new Date().toTimeString().slice(0, 5),
+      date: toLagosDateKey(),
+      time: getLagosTimeHHMM(),
     })
   }
 
@@ -443,8 +481,8 @@ export default function FuelSalesPage() {
       user?.role === 'sales_staff'
         ? user?.name || 'Sales Staff'
         : formData.sales_staff_name.trim() || user?.name || 'Sales Staff'
-    const dateValue = formData.date || new Date().toISOString().slice(0, 10)
-    const timeValue = formData.time || new Date().toTimeString().slice(0, 5)
+    const dateValue = formData.date || toLagosDateKey()
+    const timeValue = formData.time || getLagosTimeHHMM()
     const rawPumpId = formData.pump_id.trim()
     const typedPumpNumber = newPumpNumber.trim()
     const isUuid = (value: string) =>
@@ -484,7 +522,9 @@ export default function FuelSalesPage() {
     if (!branchId) {
       toast({
         title: 'Missing branch',
-        description: 'Select a branch before recording shift.',
+        description: isOwner && !isPersonalOwner
+          ? 'Select a branch (not "All Branches") before recording shift.'
+          : 'Unable to determine branch for recording shift.',
       })
       return
     }
@@ -707,7 +747,7 @@ export default function FuelSalesPage() {
         )}
       </div>
 
-      {(isOwner || userFuelBranches.length > 1) && (
+      {!isPersonalOwner && (isOwner || userFuelBranches.length > 1) && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
           <div className="flex items-center gap-4">
             <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
@@ -788,7 +828,7 @@ export default function FuelSalesPage() {
           <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
             {dayGroups.map(([dayKey, dayShifts]) => {
               const date = new Date(dayKey + 'T00:00:00')
-              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
               const salesStaffShifts = dayShifts.filter((shift) => {
                 const role = String(shift.created_by_role ?? '').trim().toLowerCase()
                 return role === 'sales_staff'

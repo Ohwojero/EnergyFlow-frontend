@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
-import { mockTenantsExtended } from '@/lib/mock-data'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 import { MobileNav } from '@/components/layout/mobile-nav'
 import { SubscriptionReminder } from '@/components/subscription-reminder'
 import { Card } from '@/components/ui/card'
 import { AlertTriangle } from 'lucide-react'
+import { apiService } from '@/lib/api'
 
 export default function DashboardLayout({
   children,
@@ -19,6 +19,7 @@ export default function DashboardLayout({
   const router = useRouter()
   const { isAuthenticated, user } = useAuth()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [tenantStatus, setTenantStatus] = useState<{ name: string; status: string } | null>(null)
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -26,13 +27,40 @@ export default function DashboardLayout({
     }
   }, [isAuthenticated, router])
 
+
+  useEffect(() => {
+    if (!user?.tenant_id || user?.role === 'super_admin') {
+      setTenantStatus(null)
+      return
+    }
+    let active = true
+    apiService
+      .getTenantById(user.tenant_id)
+      .then((tenant) => {
+        if (!active) return
+        setTenantStatus({
+          name: tenant?.name ?? user.tenant_name ?? 'Organization',
+          status: tenant?.status ?? 'active',
+        })
+      })
+      .catch(() => {
+        if (!active) return
+        setTenantStatus({
+          name: user.tenant_name ?? 'Organization',
+          status: 'active',
+        })
+      })
+    return () => {
+      active = false
+    }
+  }, [user?.tenant_id, user?.role, user?.tenant_name])
+
   if (!isAuthenticated) {
     return null
   }
 
   // Check if user's tenant is suspended
-  const userTenant = mockTenantsExtended.find(t => t.id === user?.tenant_id)
-  const isSuspended = userTenant?.status === 'suspended'
+  const isSuspended = tenantStatus?.status === 'suspended'
 
   if (isSuspended && user?.role !== 'super_admin') {
     return (
@@ -46,7 +74,7 @@ export default function DashboardLayout({
             Your account has been suspended. Please contact support for assistance.
           </p>
           <p className="text-sm text-red-600 dark:text-red-400">
-            Organization: {userTenant?.name}
+            Organization: {tenantStatus?.name ?? user?.tenant_name}
           </p>
         </Card>
       </div>

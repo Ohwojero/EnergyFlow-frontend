@@ -9,6 +9,7 @@ import { RecentTransactions } from '@/components/dashboard/recent-transactions'
 import { Building2, Wind, Fuel, Users, Package, ShoppingCart, DollarSign, ArrowUpRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 
 export default function DashboardPage() {
   const { user, selectedBranchId, selectedBranchType } = useAuth()
@@ -24,6 +25,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (user?.role === 'super_admin') {
       router.push('/admin/dashboard')
+      return
+    }
+    if (user?.role === 'org_owner' && user?.subscription_plan === 'personal') {
+      router.push('/owner-dashboard')
       return
     }
     if (user?.role === 'sales_staff') {
@@ -48,6 +53,15 @@ export default function DashboardPage() {
 
   const [gasBranchRevenueMap, setGasBranchRevenueMap] = useState<Record<string, number>>({})
   const [fuelBranchRevenueMap, setFuelBranchRevenueMap] = useState<Record<string, number>>({})
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -84,16 +98,7 @@ export default function DashboardPage() {
 
         const gasRevenueMap: Record<string, number> = {}
         let totalGasManagerSales = 0
-        const today = new Date()
-        const isSameLocalDay = (value: string | Date, today: Date) => {
-          const date = new Date(value)
-          if (Number.isNaN(date.getTime())) return false
-          return (
-            date.getFullYear() === today.getFullYear() &&
-            date.getMonth() === today.getMonth() &&
-            date.getDate() === today.getDate()
-          )
-        }
+        const todayKeySnapshot = todayKey
         
         gasBranches.forEach((branch: any, index: number) => {
           const list = Array.isArray(gasSalesLists[index]) ? gasSalesLists[index] : []
@@ -111,7 +116,7 @@ export default function DashboardPage() {
               const notes = String(tx.notes ?? '').toLowerCase()
               // Exclude payment records and filter for today only
               return !notes.includes('type:payment_record') && 
-                     isSameLocalDay(tx.created_at, today) &&
+                     isSameLagosDay(tx.created_at, todayKeySnapshot) &&
                      (salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager'))
             })
             .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
@@ -124,7 +129,7 @@ export default function DashboardPage() {
               const notes = String(tx.notes ?? '').toLowerCase()
               // Exclude payment records and filter for today only
               return !notes.includes('type:payment_record') && 
-                     isSameLocalDay(tx.created_at, today) &&
+                     isSameLagosDay(tx.created_at, todayKeySnapshot) &&
                      (salesperson.includes('manager') || salesperson === 'manager')
             })
             .reduce((sum: number, tx: any) => sum + Number(tx.amount ?? 0), 0)
@@ -142,6 +147,7 @@ export default function DashboardPage() {
           const salesStaffTotal = list
             .filter((rec: any) => {
               const role = String(rec?.created_by_role ?? '').trim().toLowerCase()
+              if (!isSameLagosDay(rec.created_at, todayKeySnapshot)) return false
               console.log(`  Shift role: ${role}, amount: ${rec.sales_amount}`)
               return role === 'sales_staff'
             })
@@ -153,7 +159,7 @@ export default function DashboardPage() {
           const managerTotal = list
             .filter((rec: any) => {
               const role = String(rec?.created_by_role ?? '').trim().toLowerCase()
-              return role === 'fuel_manager' || role === 'org_owner'
+              return isSameLagosDay(rec.created_at, todayKeySnapshot) && (role === 'fuel_manager' || role === 'org_owner')
             })
             .reduce((sum: number, tx: any) => sum + Number(tx.sales_amount ?? 0), 0)
           console.log(`Branch ${branch.name} manager total:`, managerTotal)
@@ -172,8 +178,16 @@ export default function DashboardPage() {
         console.log('Total Manager Sales (fuel + gas):', totalManagerSales)
         console.log('Combined Total Sales:', totalGasSales + totalFuelSales)
         const totalSalesCount =
-          gasSalesLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0) +
-          fuelRecLists.reduce((sum, list: any) => sum + (Array.isArray(list) ? list.length : 0), 0)
+          gasSalesLists.reduce(
+            (sum, list: any) =>
+              sum + (Array.isArray(list) ? list.filter((tx: any) => isSameLagosDay(tx.created_at, todayKeySnapshot)).length : 0),
+            0,
+          ) +
+          fuelRecLists.reduce(
+            (sum, list: any) =>
+              sum + (Array.isArray(list) ? list.filter((rec: any) => isSameLagosDay(rec.created_at, todayKeySnapshot)).length : 0),
+            0,
+          )
 
         const totalGasInventory = gasCylLists.flat().reduce(
           (sum: number, cyl: any) => sum + Number(cyl.quantity ?? 0) * Number(cyl.selling_price ?? 0),
@@ -183,14 +197,14 @@ export default function DashboardPage() {
           (sum: number, p: any) => sum + Number(p.total_value ?? 0),
           0
         )
-        const gasExpensesTotal = gasExpenseLists.flat().reduce(
-          (sum: number, e: any) => sum + Number(e.amount ?? 0),
-          0
-        )
-        const fuelExpensesTotal = fuelExpenseLists.flat().reduce(
-          (sum: number, e: any) => sum + Number(e.amount ?? 0),
-          0
-        )
+        const gasExpensesTotal = gasExpenseLists.flat().reduce((sum: number, e: any) => {
+          if (!isSameLagosDay(e.created_at, todayKeySnapshot)) return sum
+          return sum + Number(e.amount ?? 0)
+        }, 0)
+        const fuelExpensesTotal = fuelExpenseLists.flat().reduce((sum: number, e: any) => {
+          if (!isSameLagosDay(e.created_at, todayKeySnapshot)) return sum
+          return sum + Number(e.amount ?? 0)
+        }, 0)
 
         setGasSales(totalGasSales)
         setGasManagerSales(totalGasManagerSales)
@@ -208,7 +222,7 @@ export default function DashboardPage() {
     }
 
     load()
-  }, [user, selectedBranchId])
+  }, [user, selectedBranchId, todayKey])
 
   const gasBranches = useMemo(() => branches.filter((b) => b.type === 'gas'), [branches])
   const fuelBranches = useMemo(() => branches.filter((b) => b.type === 'fuel'), [branches])
@@ -293,7 +307,7 @@ export default function DashboardPage() {
               </div>
               <p className="text-sm text-muted-foreground mb-1">{isOwner && !isPersonalOwner ? 'Total Revenue' : 'Total Sales from all Pump'}</p>
               <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? filteredTotalSales : totalSales)}</h3>
-              <p className="text-xs text-muted-foreground mt-2">This month</p>
+              <p className="text-xs text-muted-foreground mt-2">Today</p>
             </Card>
 
             <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
@@ -327,7 +341,7 @@ export default function DashboardPage() {
                 <>
                   <p className="text-sm text-muted-foreground mb-1">Total Expenses</p>
                   <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(totalExpenses)}</h3>
-                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                  <p className="text-xs text-muted-foreground mt-2">Today</p>
                 </>
               )}
             </Card>
@@ -346,7 +360,7 @@ export default function DashboardPage() {
                 <>
                   <p className="text-sm text-muted-foreground mb-1">Total Sales from all Pump</p>
                   <h3 className="text-3xl font-bold text-foreground">{formatMoneyShort(isOwner && !isPersonalOwner ? filteredTotalSales : totalSales)}</h3>
-                  <p className="text-xs text-muted-foreground mt-2">This month</p>
+                  <p className="text-xs text-muted-foreground mt-2">Today</p>
                 </>
               ) : (
                 <>

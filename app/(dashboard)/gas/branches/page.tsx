@@ -28,6 +28,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
 import { useAuth } from '@/context/auth-context'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import {
   Archive,
   Eye,
@@ -156,16 +157,26 @@ export default function GasBranchesPage() {
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
   }, [selectedBranch, gasSalesTransactions])
-  
+
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const todaysBranchTransactions = branchTransactions.filter((t) => isSameLagosDay(t.created_at, todayKey))
   const branchSalesValue = selectedBranch
-    ? branchTransactions.reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
+    ? todaysBranchTransactions.reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
     : 0
-  const branchTransactionCount = branchTransactions.length
+  const branchTransactionCount = todaysBranchTransactions.length
   const branchTransactionsByDay = useMemo(() => {
     const groups: Record<string, any[]> = {}
     branchTransactions.forEach((t) => {
       const createdAt = t?.created_at ? new Date(t.created_at) : new Date()
-      const key = createdAt.toISOString().slice(0, 10) // YYYY-MM-DD format
+      const key = toLagosDateKey(createdAt)
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
@@ -488,6 +499,7 @@ export default function GasBranchesPage() {
                               day: 'numeric',
                               month: 'long',
                               year: 'numeric',
+                              timeZone: 'Africa/Lagos',
                             })
                             const dayTotal = dayItems.reduce((sum, t) => sum + Number(t.amount ?? 0), 0)
                             return (
@@ -513,6 +525,7 @@ export default function GasBranchesPage() {
                                             {new Date(t.created_at).toLocaleTimeString('en-NG', {
                                               hour: '2-digit',
                                               minute: '2-digit',
+                                              timeZone: 'Africa/Lagos',
                                             })}
                                           </p>
                                         </div>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DollarSign, CreditCard, Banknote, TrendingUp, Edit, Trash2 } from 'lucide-react'
 import { useAuth } from '@/context/auth-context'
 import { apiService } from '@/lib/api'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import { toast } from '@/hooks/use-toast'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -23,6 +24,7 @@ import {
 export default function GasPaymentModePage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
+  const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
   const [branches, setBranches] = useState<any[]>([])
   const [salesTransactions, setSalesTransactions] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
@@ -47,8 +49,9 @@ export default function GasPaymentModePage() {
       if (isOwner) {
         const allBranches = await apiService.getBranches()
         const gasBranches = Array.isArray(allBranches) ? allBranches.filter(branch => branch.type === 'gas') : []
-        
-        if (businessFilter === 'all') {
+        const personalBranchId = selectedBranchId ?? gasBranches[0]?.id
+
+        if (!isPersonalOwner && businessFilter === 'all') {
           // When "All Gas Branches" is selected, load from all branches but keep them separate
           const [salesResponses, expenseResponses] = await Promise.all([
             Promise.all(
@@ -68,9 +71,15 @@ export default function GasPaymentModePage() {
           setExpenses(expenseResponses.flat())
         } else {
           // When specific branch is selected, load only from that branch
+          const targetBranch = isPersonalOwner ? personalBranchId : businessFilter
+          if (!targetBranch) {
+            setSalesTransactions([])
+            setExpenses([])
+            return
+          }
           const [salesList, expenseList] = await Promise.all([
-            apiService.getGasSales(businessFilter),
-            apiService.getGasExpenses(businessFilter),
+            apiService.getGasSales(targetBranch),
+            apiService.getGasExpenses(targetBranch),
           ])
           setSalesTransactions(Array.isArray(salesList) ? salesList : [])
           setExpenses(Array.isArray(expenseList) ? expenseList : [])
@@ -137,30 +146,39 @@ export default function GasPaymentModePage() {
     return match ? match[1].trim().toLowerCase() : ''
   }
 
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
   const salesStaffSales = useMemo(() => {
     return salesTransactions.filter((sale: any) => {
       const salesperson = parseSalesperson(sale.notes)
       return salesperson === 'sales_staff' || (!salesperson.includes('manager') && salesperson !== 'manager')
     })
   }, [salesTransactions])
+  const salesStaffSalesToday = useMemo(
+    () => salesStaffSales.filter((sale: any) => isSameLagosDay(sale.created_at, now)),
+    [salesStaffSales, now],
+  )
 
   const transferTotal = useMemo(() => {
-    return salesStaffSales
+    return salesStaffSalesToday
       .filter((sale: any) => parsePaymentMethod(sale.notes) === 'transfer')
       .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
-  }, [salesStaffSales])
+  }, [salesStaffSalesToday])
 
   const posTotal = useMemo(() => {
-    return salesStaffSales
+    return salesStaffSalesToday
       .filter((sale: any) => parsePaymentMethod(sale.notes) === 'pos')
       .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
-  }, [salesStaffSales])
+  }, [salesStaffSalesToday])
 
   const cashTotal = useMemo(() => {
-    return salesStaffSales
+    return salesStaffSalesToday
       .filter((sale: any) => parsePaymentMethod(sale.notes) === 'cash')
       .reduce((sum: number, sale: any) => sum + Number(sale.amount ?? 0), 0)
-  }, [salesStaffSales])
+  }, [salesStaffSalesToday])
 
   const totalSales = transferTotal + posTotal + cashTotal
   const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0)
@@ -176,7 +194,7 @@ export default function GasPaymentModePage() {
     const groups: Record<string, any[]> = {}
     sales.forEach((sale) => {
       const date = new Date(sale.created_at)
-      const key = date.toISOString().slice(0, 10)
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(sale)
     })
@@ -185,7 +203,7 @@ export default function GasPaymentModePage() {
 
   const paymentsWithMethod = salesStaffSales.filter((sale: any) => parsePaymentMethod(sale.notes))
   const dayGroups = groupByDay(paymentsWithMethod)
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
 
   const resetForm = () => {
     setFormData({
@@ -325,7 +343,7 @@ export default function GasPaymentModePage() {
           <p className="text-muted-foreground">Track gas sales by payment method</p>
         </div>
         <div className="flex items-center gap-4">
-          {isOwner && (
+          {isOwner && !isPersonalOwner && (
             <Select value={businessFilter} onValueChange={setBusinessFilter}>
               <SelectTrigger className="w-40">
                 <SelectValue />
@@ -338,9 +356,11 @@ export default function GasPaymentModePage() {
               </SelectContent>
             </Select>
           )}
-          <Button onClick={() => setIsPaymentModalOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
-            Record Payment
-          </Button>
+          {!isPersonalOwner && (
+            <Button onClick={() => setIsPaymentModalOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              Record Payment
+            </Button>
+          )}
         </div>
       </div>
 
@@ -411,7 +431,7 @@ export default function GasPaymentModePage() {
           <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
             {dayGroups.map(([dayKey, dayPayments]) => {
               const date = new Date(dayKey)
-              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
               const dayTotal = dayPayments.reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0)
 
               return (
@@ -442,6 +462,7 @@ export default function GasPaymentModePage() {
                                 {new Date(sale.created_at).toLocaleTimeString('en-NG', {
                                   hour: '2-digit',
                                   minute: '2-digit',
+                                  timeZone: 'Africa/Lagos',
                                 })}
                               </td>
                               <td className="px-6 py-4 text-foreground capitalize">{parsePaymentMethod(sale.notes)}</td>

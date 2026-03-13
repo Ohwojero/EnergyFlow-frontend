@@ -1,6 +1,5 @@
 'use client'
 
-import { mockBranches } from '@/lib/mock-data'
 import type { Branch } from '@/types'
 
 const STORAGE_KEY = 'energyflow_custom_branches'
@@ -65,13 +64,7 @@ function saveRemovedIds(ids: string[]) {
 export function getAllBranches(): Branch[] {
   const stored = getStoredBranches()
   const removed = new Set(getRemovedIds())
-  const existingIds = new Set(stored.map((b) => b.id))
   const merged = stored.filter((branch) => !removed.has(branch.id))
-  mockBranches.forEach((branch) => {
-    if (!existingIds.has(branch.id) && !removed.has(branch.id)) {
-      merged.push(branch)
-    }
-  })
   return merged
 }
 

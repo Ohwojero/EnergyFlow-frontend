@@ -37,16 +37,8 @@ export function saveStoredExpenses<T>(type: string, items: T[]) {
   localStorage.setItem(storageKey(type), JSON.stringify(items))
 }
 
-export function getAllExpenses<T>(type: string, mockData: T[]): T[] {
-  const stored = getStoredExpenses<T>(type)
-  const existingIds = new Set((stored as any[]).map((i) => (i as any).id))
-  const merged = [...stored]
-  mockData.forEach((m) => {
-    if (!(existingIds.has((m as any).id))) {
-      merged.push(m)
-    }
-  })
-  return merged
+export function getAllExpenses<T>(type: string): T[] {
+  return getStoredExpenses<T>(type)
 }
 
 export function addExpense<T>(type: string, expense: T) {

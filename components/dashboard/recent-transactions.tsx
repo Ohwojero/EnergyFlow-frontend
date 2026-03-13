@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
 import { useEffect, useMemo, useState } from 'react'
 import { apiService } from '@/lib/api'
+import { toLagosDateKey } from '@/lib/lagos-time'
 
 type TxItem = {
   id: string
@@ -116,6 +117,7 @@ export function RecentTransactions() {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      timeZone: 'Africa/Lagos',
     })
   }
 
@@ -123,14 +125,14 @@ export function RecentTransactions() {
     const groups: Record<string, TxItem[]> = {}
     transactions.forEach((t) => {
       const date = new Date(t.created_at)
-      const key = date.toISOString().slice(0, 10)
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }, [transactions])
 
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
   const isSalesStaffTransaction = (t: TxItem) => {
     if (t.source === 'gas') {
       const salesperson = String(t.created_by_role ?? '').toLowerCase()
@@ -162,6 +164,7 @@ export function RecentTransactions() {
               day: 'numeric',
               month: 'long',
               year: 'numeric',
+              timeZone: 'Africa/Lagos',
             })
             const salesStaffTotal = dayTransactions
               .filter(isSalesStaffTransaction)

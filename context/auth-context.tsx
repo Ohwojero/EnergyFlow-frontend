@@ -62,6 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const storedBranchId = localStorage.getItem('energyflow_branch_id')
       const assignedSet = new Set(currentUser.assigned_branches ?? [])
+      const isPersonalOwner = currentUser.role === 'org_owner' && currentUser.subscription_plan === 'personal'
+
+      // For personal plan users, automatically select their single branch
+      if (isPersonalOwner && branchList.length > 0) {
+        const preferredType = (currentUser as any)?.business_type
+        const matched = preferredType
+          ? branchList.find((b: any) => String(b.type) === String(preferredType))
+          : null
+        const firstBranch = matched ?? branchList[0]
+        setSelectedBranchId(firstBranch.id)
+        setSelectedBranchType(firstBranch.type)
+        localStorage.setItem('energyflow_branch_id', firstBranch.id)
+        localStorage.setItem('energyflow_branch_type', firstBranch.type)
+        return
+      }
 
       const canUseStored = storedBranchId
         ? branchList.some(
@@ -108,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string
     businessName: string
     plan: 'personal' | 'organisation'
+    businessType?: 'gas' | 'fuel'
   }) => {
     const result = await apiService.register({
       name: data.name,
@@ -115,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password: data.password,
       business_name: data.businessName,
       plan: data.plan,
+      business_type: data.businessType,
     })
     const token = result?.access_token
     const currentUser = result?.user as User | undefined

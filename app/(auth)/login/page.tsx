@@ -6,7 +6,7 @@ import { useAuth } from '@/context/auth-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { Zap, Mail, Lock } from 'lucide-react'
+import { Zap, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('password')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,7 +30,13 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       await login(email, password)
-      router.push('/dashboard')
+      const raw = localStorage.getItem('energyflow_user')
+      const parsed = raw ? JSON.parse(raw) : null
+      if (parsed?.role === 'org_owner' && parsed?.subscription_plan === 'personal') {
+        router.push('/owner-dashboard')
+      } else {
+        router.push('/dashboard')
+      }
     } catch {
       setError('Login failed. Please try again.')
       setIsLoading(false)
@@ -76,13 +83,21 @@ export default function LoginPage() {
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
               <Input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="pl-10"
+                className="pl-10 pr-10"
                 disabled={isLoading}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
@@ -114,3 +129,4 @@ export default function LoginPage() {
     </div>
   )
 }
+

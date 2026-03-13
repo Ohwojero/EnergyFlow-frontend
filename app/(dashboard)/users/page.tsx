@@ -25,10 +25,25 @@ export default function UsersPage() {
   const { user: currentUser, selectedBranchType, selectedBranchId } = useAuth()
   const isPersonalOwner =
     currentUser?.role === 'org_owner' && currentUser?.subscription_plan === 'personal'
-  const isPersonalContext =
-    isPersonalOwner ||
-    currentUser?.role === 'gas_manager' || currentUser?.role === 'fuel_manager'
-  const getDefaultRole = (): UserRole => 'sales_staff'
+  const isPersonalManager =
+    currentUser?.subscription_plan === 'personal' &&
+    (currentUser?.role === 'gas_manager' || currentUser?.role === 'fuel_manager')
+  const isPersonalScoped = isPersonalOwner || isPersonalManager
+  const isOrgOwnerOrganisation =
+    currentUser?.role === 'org_owner' && currentUser?.subscription_plan === 'organisation'
+  const getPersonalManagerRole = (): UserRole => {
+    const businessType = (currentUser as any)?.business_type
+    return businessType === 'fuel' ? 'fuel_manager' : 'gas_manager'
+  }
+  const getOrgOwnerDefaultRole = (): UserRole => {
+    const hasFuelOnly =
+      (currentUser?.tenant_branch_types?.includes('fuel') ?? false) &&
+      !(currentUser?.tenant_branch_types?.includes('gas') ?? false)
+    if (hasFuelOnly || selectedBranchType === 'fuel') return 'fuel_manager'
+    return 'gas_manager'
+  }
+  const getDefaultRole = (): UserRole =>
+    isPersonalOwner ? getPersonalManagerRole() : isOrgOwnerOrganisation ? getOrgOwnerDefaultRole() : 'sales_staff'
 
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [tenantBranches, setTenantBranches] = useState<Branch[]>([])
@@ -69,10 +84,13 @@ export default function UsersPage() {
         ])
         setAllUsers((Array.isArray(usersData) ? usersData : []).map(normalizeUser))
         let branchList = Array.isArray(branchesData) ? branchesData : []
-        if (isPersonalOwner && branchList.length === 0) {
-          const gasBranches = await apiService.getGasBranches().catch(() => [])
-          branchList = Array.isArray(gasBranches) ? gasBranches : []
-        }
+      if (isPersonalOwner && branchList.length === 0) {
+        const businessType = (currentUser as any)?.business_type
+        const fallback = businessType === 'fuel'
+          ? await apiService.getFuelBranches().catch(() => [])
+          : await apiService.getGasBranches().catch(() => [])
+        branchList = Array.isArray(fallback) ? fallback : []
+      }
         setTenantBranches(branchList)
       } catch {
         toast({
@@ -90,6 +108,7 @@ export default function UsersPage() {
   const users = useMemo(() => {
     if (!currentUser) return []
     if (currentUser.role === 'super_admin') return allUsers
+    if (currentUser.role === 'org_owner') return allUsers
     if (currentUser.role === 'gas_manager' || currentUser.role === 'fuel_manager') {
       // Backend already scopes manager-visible users to sales staff in manager branches.
       // Avoid double-filtering here to prevent hiding newly created users.
@@ -162,6 +181,7 @@ export default function UsersPage() {
 
   const handleOpenAddUser = () => {
     setEditingUserId(null)
+    setFormData((prev) => ({ ...prev, role: getDefaultRole() }))
     resetForm()
     setIsUserDialogOpen(true)
   }
@@ -204,7 +224,11 @@ export default function UsersPage() {
     const name = formData.name.trim()
     const email = formData.email.trim()
     const password = formData.password
-    const normalizedRole = isPersonalContext ? 'sales_staff' : formData.role
+    const normalizedRole = isPersonalOwner
+      ? getPersonalManagerRole()
+      : isPersonalManager
+        ? 'sales_staff'
+        : formData.role
     if (!name || !email || (!editingUserId && !password)) {
       toast({
         title: 'Missing details',
@@ -225,18 +249,20 @@ export default function UsersPage() {
 
     setIsSubmitting(true)
     try {
-      const selectedBranch = isPersonalContext
+      const selectedBranch = isPersonalOwner || isPersonalManager
         ? tenantBranches.find((b) => b.id === selectedBranchId) ??
           tenantBranches.find((b) => currentUser.assigned_branches.includes(b.id)) ??
           tenantBranches[0]
         : tenantBranches.find((b) => b.id === formData.branchId)
       if (editingUserId) {
-        const updatePayload = isPersonalContext
+        const updatePayload = (isPersonalOwner || isPersonalManager)
           ? {
               name,
               email,
               ...(password ? { password } : {}),
-              role: 'sales_staff' as const,
+              role: normalizedRole,
+              branch_ids: selectedBranch ? [selectedBranch.id] : [],
+              assigned_branch_types: selectedBranch ? [selectedBranch.type] : [],
             }
           : {
               name,
@@ -266,21 +292,21 @@ export default function UsersPage() {
           description: `${name} was updated successfully.`,
         })
       } else {
-        const assignedBranchTypes: BranchType[] = isPersonalContext
-          ? []
-          : selectedBranch
+        const assignedBranchTypes: BranchType[] = selectedBranch
           ? [selectedBranch.type]
           : normalizedRole === 'gas_manager'
             ? ['gas']
             : normalizedRole === 'fuel_manager'
               ? ['fuel']
               : []
-        const payload = isPersonalContext
+        const payload = (isPersonalOwner || isPersonalManager)
           ? {
               name,
               email,
               password,
-              role: 'sales_staff' as const,
+              role: normalizedRole,
+              branch_ids: selectedBranch ? [selectedBranch.id] : [],
+              assigned_branch_types: assignedBranchTypes,
             }
           : {
               name,
@@ -407,20 +433,33 @@ export default function UsersPage() {
                             </td>
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end gap-2">
-                                <button
-                                  type="button"
-                                  className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
-                                  onClick={() => handleEditUser(user)}
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
-                                  onClick={() => handleDeleteUser(user)}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {(() => {
+                                  const isOwnerAccount =
+                                    currentUser?.role === 'org_owner' &&
+                                    user.role === 'org_owner' &&
+                                    currentUser.id === user.id
+                                  const isActionDisabled = isOwnerAccount
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
+                                        onClick={() => handleEditUser(user)}
+                                        disabled={isActionDisabled}
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors"
+                                        onClick={() => handleDeleteUser(user)}
+                                        disabled={isActionDisabled}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </>
+                                  )
+                                })()}
                               </div>
                             </td>
                           </tr>
@@ -451,9 +490,11 @@ export default function UsersPage() {
             <DialogDescription>
               {editingUserId
                 ? 'Update user details.'
-                : isPersonalContext
-                  ? 'Create sales staff users.'
-                  : 'Create a user for your organisation and assign an optional branch.'}
+                : isPersonalOwner
+                  ? 'Create a manager for your personal plan.'
+                  : isPersonalManager
+                    ? 'Create sales staff users.'
+                    : 'Create a user for your organisation and assign an optional branch.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -497,10 +538,22 @@ export default function UsersPage() {
                 value={formData.role}
                 onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value as UserRole }))}
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                disabled={isPersonalScoped}
               >
-                <option value="sales_staff">Sales Staff</option>
-                {!isPersonalContext && (
+                {isPersonalOwner ? (
+                  <option value={getPersonalManagerRole()}>
+                    {getPersonalManagerRole() === 'fuel_manager' ? 'Fuel Manager' : 'Gas Manager'}
+                  </option>
+                ) : isPersonalManager ? (
+                  <option value="sales_staff">Sales Staff</option>
+                ) : isOrgOwnerOrganisation ? (
                   <>
+                    <option value="gas_manager">Gas Manager</option>
+                    <option value="fuel_manager">Fuel Manager</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="sales_staff">Sales Staff</option>
                     <option value="gas_manager">Gas Manager</option>
                     <option value="fuel_manager">Fuel Manager</option>
                   </>
@@ -508,7 +561,7 @@ export default function UsersPage() {
               </select>
             </div>
 
-            {!isPersonalContext && (
+            {!isPersonalScoped && (
               <div className="space-y-2">
                 <Label htmlFor="branch">Assign Branch (Optional)</Label>
                 <select

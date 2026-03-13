@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { apiService } from '@/lib/api'
+import { getLagosTimeHHMM, isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import type { Branch, GasTransaction } from '@/types'
 
 type SaleTransaction = GasTransaction & { branch_name?: string; payment_method?: string; salesperson?: string }
@@ -53,9 +54,29 @@ export default function GasSalesPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
   const isPersonalOwner = isOwner && user?.subscription_plan === 'personal'
+  const isPersonalFuelOwner = isPersonalOwner && (user as any)?.business_type === 'fuel'
   const isManager = user?.role === 'gas_manager'
   const isSalesStaff = user?.role === 'sales_staff'
   const canEditDelete = isOwner || isManager
+
+  // Redirect personal fuel plan users to fuel sales
+  useEffect(() => {
+    if (isPersonalFuelOwner) {
+      window.location.href = '/fuel/sales'
+      return
+    }
+  }, [isPersonalFuelOwner])
+
+  // Don't render anything for personal fuel plan users while redirecting
+  if (isPersonalFuelOwner) {
+    return (
+      <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">Redirecting to Fuel Sales...</p>
+        </div>
+      </div>
+    )
+  }
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [branchUsers, setBranchUsers] = useState<any[]>([])
@@ -79,8 +100,8 @@ export default function GasSalesPage() {
     price_per_kg: '',
     paymentMethod: '',
     salesperson: '',
-    date: new Date().toISOString().slice(0, 10),
-    time: new Date().toTimeString().slice(0, 5),
+    date: toLagosDateKey(),
+    time: getLagosTimeHHMM(),
   })
   const [editFormData, setEditFormData] = useState({
     quantity: '',
@@ -230,11 +251,17 @@ export default function GasSalesPage() {
     ? 0
     : kgSold * pricePerKgValue
 
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
   const salesStaffSales = salesTransactions.filter((t) => {
     const salesperson = String(t.salesperson ?? '').toLowerCase()
     const notes = String(t.notes ?? '').toLowerCase()
     // Exclude payment records and only include sales staff transactions
     return !notes.includes('type:payment_record') && 
+           isSameLagosDay(t.created_at, now) &&
            (salesperson === 'sales_staff' || 
             (!salesperson.includes('manager') && 
              salesperson !== 'manager' && 
@@ -243,10 +270,14 @@ export default function GasSalesPage() {
   })
   const managerSales = salesTransactions.filter((t) => {
     const salesperson = String(t.salesperson ?? '').toLowerCase()
-    return salesperson.includes('manager') || salesperson === 'manager'
+    return isSameLagosDay(t.created_at, now) && (salesperson.includes('manager') || salesperson === 'manager')
   })
+  const todayTransactions = salesTransactions.filter((t) => isSameLagosDay(t.created_at, now))
   const totalSales = salesStaffSales.reduce((sum, t) => sum + t.amount, 0)
-  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0)
+  const totalExpenses = expenses.reduce((sum, e) => {
+    if (!isSameLagosDay(e.created_at, now)) return sum
+    return sum + Number(e.amount ?? 0)
+  }, 0)
   const totalSalesMinusExpense = totalSales - totalExpenses
   const formatMoneyShort = (amount: number) => {
     if (amount >= 1000000) return `N${(amount / 1000000).toFixed(2)}M`
@@ -261,13 +292,14 @@ export default function GasSalesPage() {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Africa/Lagos',
     })
 
   const groupByDay = (transactions: SaleTransaction[]) => {
     const groups: Record<string, SaleTransaction[]> = {}
     transactions.forEach((t) => {
       const date = new Date(t.created_at)
-      const key = date.toISOString().slice(0, 10)
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(t)
     })
@@ -275,7 +307,7 @@ export default function GasSalesPage() {
   }
 
   const dayGroups = groupByDay(salesTransactions)
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
 
   const resetForm = () => {
     setFormData({
@@ -286,8 +318,8 @@ export default function GasSalesPage() {
       price_per_kg: '',
       paymentMethod: '',
       salesperson: '',
-      date: new Date().toISOString().slice(0, 10),
-      time: new Date().toTimeString().slice(0, 5),
+      date: toLagosDateKey(),
+      time: getLagosTimeHHMM(),
     })
   }
 
@@ -328,20 +360,21 @@ export default function GasSalesPage() {
     const branchId = isOwner
       ? localSelectedBranchId
       : selectedBranchId ?? user?.assigned_branches?.[0] ?? currentBranchInfo?.id ?? branches[0]?.id
+    
     if (!branchId) {
       toast({
         title: 'Missing branch',
-        description: isOwner
+        description: isOwner && !isPersonalOwner
           ? 'Select a branch (not "All Branches") before recording sales.'
-          : 'Select a branch before recording sales.',
+          : 'Unable to determine branch for recording sales.',
       })
       return
     }
 
     setIsSubmitting(true)
     try {
-      const dateValue = formData.date || new Date().toISOString().slice(0, 10)
-      const timeValue = formData.time || new Date().toTimeString().slice(0, 5)
+      const dateValue = formData.date || toLagosDateKey()
+      const timeValue = formData.time || getLagosTimeHHMM()
       const customTimestamp = new Date(`${dateValue}T${timeValue}:00`).toISOString()
       
       const created = await apiService.createGasSale({
@@ -484,7 +517,7 @@ export default function GasSalesPage() {
         </Button>
       </div>
 
-      {!isPersonalOwner && (isOwner || userGasBranches.length > 1) && (
+      {!isPersonalOwner && (isOwner || (userGasBranches.length > 1)) && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
           <div className="flex items-center gap-4">
             <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
@@ -534,7 +567,7 @@ export default function GasSalesPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Transactions</p>
-          <h3 className="text-3xl font-bold text-foreground">{salesTransactions.length}</h3>
+          <h3 className="text-3xl font-bold text-foreground">{todayTransactions.length}</h3>
           <p className="text-xs text-muted-foreground mt-2">Recorded sales</p>
         </Card>
 
@@ -565,7 +598,7 @@ export default function GasSalesPage() {
           <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
             {dayGroups.map(([dayKey, transactions]) => {
               const date = new Date(dayKey)
-              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
               
               const salesStaffTransactions = transactions.filter((t) => {
                 const salesperson = String(t.salesperson ?? '').toLowerCase()
@@ -610,6 +643,7 @@ export default function GasSalesPage() {
                                 {new Date(transaction.created_at).toLocaleTimeString('en-NG', {
                                   hour: '2-digit',
                                   minute: '2-digit',
+                                  timeZone: 'Africa/Lagos',
                                 })}
                               </td>
                               <td className="px-6 py-4 text-foreground">

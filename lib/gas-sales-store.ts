@@ -1,6 +1,5 @@
 'use client'
 
-import { mockGasTransactions } from '@/lib/mock-data'
 import type { GasTransaction } from '@/types'
 
 const STORAGE_KEY = 'energyflow_custom_gas_sales'
@@ -41,18 +40,7 @@ export function saveStoredGasSales(sales: GasTransaction[]) {
 
 export function getAllGasSales(): GasTransaction[] {
   const stored = getStoredGasSales()
-  const existingIds = new Set(stored.map((sale) => sale.id))
-  const merged = [...stored]
-
-  mockGasTransactions
-    .filter((transaction) => transaction.type === 'sale')
-    .forEach((transaction) => {
-      if (!existingIds.has(transaction.id)) {
-        merged.push(transaction)
-      }
-    })
-
-  return merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return stored.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 }
 
 export function addGasSale(sale: GasTransaction) {

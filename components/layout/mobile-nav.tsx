@@ -15,6 +15,7 @@ import {
   Users,
   Building2,
   LogOut,
+  DollarSign,
   X,
   Activity,
   BarChart3,
@@ -32,6 +33,8 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
   const [branches, setBranches] = useState<any[]>([])
   const navTitle = user?.tenant_name || user?.name || 'EnergyFlow'
   const navSubtitle = user?.tenant_name ? 'Business Account' : 'Management System'
+  const isPersonalOwner = user?.role === 'org_owner' && user?.subscription_plan === 'personal'
+  const personalBusinessType = (user as any)?.business_type
 
   useEffect(() => {
     apiService.getBranches().then((data) => {
@@ -41,10 +44,13 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
     })
   }, [])
 
-  const currentBranch = useMemo(
-    () => branches.find((b) => b.id === selectedBranchId),
-    [branches, selectedBranchId]
-  )
+  const currentBranch = useMemo(() => {
+    if (isPersonalOwner && personalBusinessType) {
+      const matched = branches.find((b) => String(b.type) === String(personalBusinessType))
+      if (matched) return matched
+    }
+    return branches.find((b) => b.id === selectedBranchId)
+  }, [branches, selectedBranchId, isPersonalOwner, personalBusinessType])
 
   if (!user) return null
 
@@ -53,9 +59,10 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
     const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
 
     if (user.role !== 'sales_staff') {
+      const isPersonalOwner = user.role === 'org_owner' && user.subscription_plan === 'personal'
       items.push({
         label: 'Dashboard',
-        href: '/dashboard',
+        href: isPersonalOwner ? '/owner-dashboard' : '/dashboard',
         icon: LayoutDashboard,
       })
     }
@@ -70,16 +77,22 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
 
       case 'org_owner':
         if (isPersonalOwner) {
-          items.push(
-            { label: 'Daily Activities', href: '/gas/daily-activities', icon: Activity },
-            { label: 'Weekly Dashboard', href: '/gas/weekly-dashboard', icon: BarChart3 },
-            { label: 'Yearly Dashboard', href: '/gas/yearly-dashboard', icon: TrendingUp },
-            { label: 'Inventory', href: '/gas/inventory', icon: Package },
-            { label: 'Sales', href: '/gas/sales', icon: ShoppingCart },
-            { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
-            { label: 'User', href: '/users', icon: Users },
-            { label: 'Reports', href: '/reports', icon: FileText },
-          )
+          const businessType = (user as any)?.business_type
+          if (businessType === 'fuel') {
+            items.push(
+              { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
+              { label: 'Expense', href: '/fuel/expenses', icon: AlertCircle },
+              { label: 'User', href: '/users', icon: Users },
+              { label: 'Reports', href: '/reports', icon: FileText },
+            )
+          } else {
+            items.push(
+              { label: 'Payment Mode', href: '/gas/payment-mode', icon: DollarSign },
+              { label: 'Expense', href: '/gas/expenses', icon: AlertCircle },
+              { label: 'User', href: '/users', icon: Users },
+              { label: 'Reports', href: '/reports', icon: FileText },
+            )
+          }
           break
         }
 
@@ -206,6 +219,9 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
           <div className="px-6 py-3 bg-sidebar-primary/10 border-b border-sidebar-border">
             <p className="text-xs text-sidebar-foreground/60 uppercase">Current Branch</p>
             <p className="font-semibold text-sm mt-1">{currentBranch.name}</p>
+            <p className="text-xs text-sidebar-foreground/50">
+              {(isPersonalOwner && personalBusinessType ? personalBusinessType : currentBranch.type).toUpperCase()}
+            </p>
           </div>
         )}
 

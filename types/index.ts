@@ -1,6 +1,7 @@
 // User & Auth Types
 export type UserRole = 'super_admin' | 'org_owner' | 'gas_manager' | 'fuel_manager' | 'sales_staff'
 export type BranchType = 'gas' | 'fuel'
+export type BusinessType = 'gas' | 'fuel'
 
 export interface User {
   id: string
@@ -13,6 +14,7 @@ export interface User {
   tenant_branch_types?: BranchType[]
   assigned_branches: string[]
   assigned_branch_types: BranchType[]
+  business_type?: BusinessType
   created_at: string
 }
 
@@ -22,7 +24,7 @@ export interface AuthContextType {
   selectedBranchId: string | null
   selectedBranchType: BranchType | null
   login: (email: string, password: string) => Promise<void>
-  register: (data: { name: string; email: string; password: string; businessName: string; plan: 'personal' | 'organisation' }) => Promise<void>
+  register: (data: { name: string; email: string; password: string; businessName: string; plan: 'personal' | 'organisation'; businessType?: BusinessType }) => Promise<void>
   logout: () => void
   selectBranch: (branchId: string, branchType: BranchType) => void
 }

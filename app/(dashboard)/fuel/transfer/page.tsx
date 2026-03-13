@@ -10,6 +10,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { useAuth } from '@/context/auth-context'
 import { toast } from '@/hooks/use-toast'
 import { apiService } from '@/lib/api'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import type { Branch } from '@/types'
 import {
   Dialog,
@@ -85,6 +86,15 @@ export default function FuelTransferPage() {
     loadBranches()
   }, [])
 
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
   const loadTransfers = async () => {
     try {
       if (isOwner) {
@@ -120,10 +130,8 @@ export default function FuelTransferPage() {
           Promise.all(targetBranchIds.map((branchId) => apiService.getFuelExpenses(branchId).catch(() => [])))
         ])
         setShifts(shiftResponses.flat())
-        const today = new Date()
         const todayExpenses = expenseResponses.flat().reduce((sum, exp: any) => {
-          const expDate = new Date(exp.created_at)
-          if (expDate.toDateString() === today.toDateString()) {
+          if (isSameLagosDay(exp.created_at, todayKey)) {
             return sum + Number(exp.amount || 0)
           }
           return sum
@@ -135,10 +143,8 @@ export default function FuelTransferPage() {
           apiService.getFuelExpenses(selectedBranchId).catch(() => [])
         ])
         setShifts(Array.isArray(shiftData) ? shiftData : [])
-        const today = new Date()
         const todayExpenses = (Array.isArray(expenseData) ? expenseData : []).reduce((sum, exp: any) => {
-          const expDate = new Date(exp.created_at)
-          if (expDate.toDateString() === today.toDateString()) {
+          if (isSameLagosDay(exp.created_at, todayKey)) {
             return sum + Number(exp.amount || 0)
           }
           return sum
@@ -162,12 +168,11 @@ export default function FuelTransferPage() {
     }
   }, [selectedBranchId, branches, isOwner, localSelectedBranchId])
 
-  const totalTransfers = transfers.reduce((sum, t) => sum + Number(t.amount), 0)
-  const today = new Date()
+  const todayTransfers = transfers.filter((t) => isSameLagosDay(t.created_at, todayKey))
+  const totalTransfers = todayTransfers.reduce((sum, t) => sum + Number(t.amount), 0)
   const todayShifts = shifts.filter((s: any) => {
-    const shiftDate = new Date(s.created_at)
     const role = String(s.created_by_role ?? '').trim().toLowerCase()
-    return shiftDate.toDateString() === today.toDateString() && role === 'sales_staff'
+    return isSameLagosDay(s.created_at, todayKey) && role === 'sales_staff'
   })
   const totalSalesFromPump = todayShifts.reduce((sum, s: any) => sum + Number(s.sales_amount || 0), 0)
   const totalSalesMinusExpense = totalSalesFromPump - expenses
@@ -386,7 +391,7 @@ export default function FuelTransferPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-1">Transfer Count</p>
-          <h3 className="text-3xl font-bold text-foreground">{transfers.length}</h3>
+          <h3 className="text-3xl font-bold text-foreground">{todayTransfers.length}</h3>
           <p className="text-xs text-muted-foreground mt-2">Today</p>
         </Card>
       </div>
@@ -401,18 +406,18 @@ export default function FuelTransferPage() {
             <p className="text-muted-foreground">No transfers recorded yet</p>
           </div>
         ) : (
-          <Accordion type="multiple" defaultValue={[new Date().toISOString().slice(0, 10)]} className="w-full">
+          <Accordion type="multiple" defaultValue={[todayKey]} className="w-full">
             {(() => {
               const groups: Record<string, Transfer[]> = {}
               transfers.forEach((t) => {
                 const date = new Date(t.created_at)
-                const key = date.toISOString().slice(0, 10)
+                const key = toLagosDateKey(date)
                 if (!groups[key]) groups[key] = []
                 groups[key].push(t)
               })
               return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0])).map(([dayKey, dayTransfers]) => {
                 const date = new Date(dayKey)
-                const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
                 const dayTotal = dayTransfers.reduce((sum, t) => sum + Number(t.amount), 0)
                 
                 return (
@@ -440,10 +445,11 @@ export default function FuelTransferPage() {
                             {dayTransfers.map((transfer) => (
                               <tr key={transfer.id} className="border-b border-border hover:bg-muted/50 transition-colors">
                                 <td className="px-6 py-4 text-foreground">
-                                  {new Date(transfer.created_at).toLocaleTimeString('en-NG', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
+                                {new Date(transfer.created_at).toLocaleTimeString('en-NG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  timeZone: 'Africa/Lagos',
+                                })}
                                 </td>
                                 <td className="px-6 py-4 text-foreground">{transfer.staff_name}</td>
                                 <td className="px-6 py-4 font-semibold text-foreground">₦{Number(transfer.amount).toLocaleString()}</td>

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/context/auth-context'
 import { apiService } from '@/lib/api'
+import { isSameLagosDay, toLagosDateKey } from '@/lib/lagos-time'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import {
   Dialog,
@@ -212,39 +213,33 @@ export default function FuelExpensesPage() {
 
   const currentBranchType = 'fuel'
 
-  const isSameLocalDay = (value: string | Date, today: Date) => {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return false
-    return (
-      date.getFullYear() === today.getFullYear() &&
-      date.getMonth() === today.getMonth() &&
-      date.getDate() === today.getDate()
-    )
-  }
-
-  const now = new Date()
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
   const totalExpenses = visibleExpenses
-    .filter((exp) => isSameLocalDay(exp.created_at, now))
+    .filter((exp) => isSameLagosDay(exp.created_at, now))
     .reduce((sum, exp) => sum + exp.amount, 0)
   const totalSalesFromPump = (() => {
     if (isOwner) {
       if (!localSelectedBranchId) {
         return fuelShiftSales
-          .filter((row) => isSameLocalDay(row.created_at, now))
+          .filter((row) => isSameLagosDay(row.created_at, now))
           .reduce((sum, row) => sum + row.sales_amount, 0)
       }
       return fuelShiftSales
-        .filter((row) => row.branch_id === localSelectedBranchId && isSameLocalDay(row.created_at, now))
+        .filter((row) => row.branch_id === localSelectedBranchId && isSameLagosDay(row.created_at, now))
         .reduce((sum, row) => sum + row.sales_amount, 0)
     }
     const targetBranchId = activeFuelBranchId
     if (!targetBranchId) {
       return fuelShiftSales
-        .filter((row) => isSameLocalDay(row.created_at, now))
+        .filter((row) => isSameLagosDay(row.created_at, now))
         .reduce((sum, row) => sum + row.sales_amount, 0)
     }
     return fuelShiftSales
-      .filter((row) => row.branch_id === targetBranchId && isSameLocalDay(row.created_at, now))
+      .filter((row) => row.branch_id === targetBranchId && isSameLagosDay(row.created_at, now))
       .reduce((sum, row) => sum + row.sales_amount, 0)
   })()
   const expTotalSales = totalSalesFromPump - totalExpenses
@@ -271,6 +266,7 @@ export default function FuelExpensesPage() {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      timeZone: 'Africa/Lagos',
     })
   }
 
@@ -278,7 +274,7 @@ export default function FuelExpensesPage() {
     const groups: Record<string, T[]> = {}
     expenses.forEach((e) => {
       const date = new Date(e.created_at)
-      const key = date.toISOString().slice(0, 10)
+      const key = toLagosDateKey(date)
       if (!groups[key]) groups[key] = []
       groups[key].push(e)
     })
@@ -286,7 +282,7 @@ export default function FuelExpensesPage() {
   }
 
   const dayGroups = groupByDay(visibleExpenses)
-  const currentDay = new Date().toISOString().slice(0, 10)
+  const currentDay = toLagosDateKey()
 
   const resetForm = () => {
     setFormData({
@@ -536,7 +532,7 @@ export default function FuelExpensesPage() {
           <Accordion type="multiple" defaultValue={[currentDay]} className="w-full">
             {dayGroups.map(([dayKey, dayExpenses]) => {
               const date = new Date(dayKey)
-              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              const dayName = date.toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
               const dayTotal = dayExpenses.reduce((sum, e) => sum + e.amount, 0)
               
               return (
@@ -569,6 +565,7 @@ export default function FuelExpensesPage() {
                                 {new Date(expense.created_at).toLocaleTimeString('en-NG', {
                                   hour: '2-digit',
                                   minute: '2-digit',
+                                  timeZone: 'Africa/Lagos',
                                 })}
                               </td>
                               <td className="px-6 py-4 text-foreground">{expense.branch_name}</td>

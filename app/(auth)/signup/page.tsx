@@ -6,7 +6,7 @@ import { useAuth } from '@/context/auth-context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react'
 
 function SignupForm() {
   const router = useRouter()
@@ -20,9 +20,11 @@ function SignupForm() {
     email: '',
     password: '',
     businessName: '',
+    businessType: '' as '' | 'gas' | 'fuel',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -48,18 +50,35 @@ function SignupForm() {
         return
       }
 
+      if (plan === 'personal' && !formData.businessType) {
+        setError('Please select Gas or Fuel for personal plan.')
+        setLoading(false)
+        return
+      }
+
       await register({
         name: formData.name,
         email: formData.email,
         password: formData.password,
         businessName: formData.businessName,
         plan,
+        businessType: plan === 'personal' ? (formData.businessType as 'gas' | 'fuel') : undefined,
       })
 
       // Redirect to dashboard
-      router.push('/dashboard')
+      // Redirect based on plan type
+      if (plan === 'personal') {
+        router.push('/owner-dashboard')
+      } else {
+        router.push('/dashboard')
+      }
     } catch (err) {
-      setError('An error occurred. Please try again.')
+      const message = err instanceof Error ? err.message : 'An error occurred. Please try again.'
+      if (message.toLowerCase().includes('email already')) {
+        setError('Email already in use. Please use another email.')
+      } else {
+        setError(message)
+      }
     } finally {
       setLoading(false)
     }
@@ -109,6 +128,42 @@ function SignupForm() {
               />
             </div>
 
+            {/* Business Type Selection for Personal Plans */}
+            {plan === 'personal' && (
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-2">Business Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, businessType: 'gas' }))}
+                    className={`p-3 rounded-lg border text-sm font-medium transition-all ${
+                      formData.businessType === 'gas'
+                        ? 'bg-blue-100 border-blue-300 text-blue-700 dark:bg-blue-900/30 dark:border-blue-600 dark:text-blue-300'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300'
+                    }`}
+                    disabled={loading}
+                  >
+                    🔥 Gas Operations
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, businessType: 'fuel' }))}
+                    className={`p-3 rounded-lg border text-sm font-medium transition-all ${
+                      formData.businessType === 'fuel'
+                        ? 'bg-orange-100 border-orange-300 text-orange-700 dark:bg-orange-900/30 dark:border-orange-600 dark:text-orange-300'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300'
+                    }`}
+                    disabled={loading}
+                  >
+                    ⛽ Fuel Operations
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Choose your primary business operation type
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-foreground mb-1">Full Name</label>
               <Input
@@ -137,15 +192,25 @@ function SignupForm() {
 
             <div>
               <label className="block text-xs font-medium text-foreground mb-1">Password</label>
-              <Input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                placeholder="••••••••"
-                disabled={loading}
-                className="bg-white dark:bg-gray-800 text-sm h-9"
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="••••••••"
+                  disabled={loading}
+                  className="bg-white dark:bg-gray-800 text-sm h-9 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -204,3 +269,4 @@ export default function SignupPage() {
     </Suspense>
   )
 }
+

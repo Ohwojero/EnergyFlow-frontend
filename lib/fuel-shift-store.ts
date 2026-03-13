@@ -1,6 +1,5 @@
 'use client'
 
-import { mockShiftReconciliation } from '@/lib/mock-data'
 import type { ShiftReconciliation } from '@/types'
 
 const STORAGE_KEY = 'energyflow_custom_fuel_shifts'
@@ -41,16 +40,7 @@ export function saveStoredFuelShifts(shifts: ShiftReconciliation[]) {
 
 export function getAllFuelShifts(): ShiftReconciliation[] {
   const stored = getStoredFuelShifts()
-  const existingIds = new Set(stored.map((shift) => shift.id))
-  const merged = [...stored]
-
-  mockShiftReconciliation.forEach((shift) => {
-    if (!existingIds.has(shift.id)) {
-      merged.push(shift)
-    }
-  })
-
-  return merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return stored.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 }
 
 export function addFuelShift(shift: ShiftReconciliation) {
