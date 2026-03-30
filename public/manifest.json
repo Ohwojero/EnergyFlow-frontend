@@ -1,0 +1,22 @@
+{
+  "short_name": "EnergyFlow",
+  "name": "EnergyFlow - Gas & Fuel Management SaaS",
+  "description": "Multi-branch SaaS platform for managing LPG Gas Plants and Fuel Stations",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon-light-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    }
+  ],
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "theme_color": "#0ea5e9",
+  "background_color": "#ffffff"
+}

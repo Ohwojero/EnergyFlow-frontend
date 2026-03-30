@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 // import { Analytics } from '@vercel/analytics/next'
 import { AuthProvider } from '@/context/auth-context'
 import { Toaster } from '@/components/ui/toaster'
+import { PwaInstallButton } from '@/components/pwa-install-button'
 import './globals.css'
 
 const geist = Geist({ subsets: ["latin"], variable: '--font-sans' });
@@ -12,6 +13,8 @@ export const metadata: Metadata = {
   title: 'EnergyFlow - Gas & Fuel Management SaaS',
   description: 'Multi-branch SaaS platform for managing LPG Gas Plants and Fuel Stations',
   generator: 'v0.app',
+  manifest: '/manifest.json',
+  themeColor: '#0ea5e9',
   icons: {
     icon: [
       {
@@ -20,6 +23,15 @@ export const metadata: Metadata = {
       },
     ],
     apple: '/apple-icon.png',
+  },
+  keywords: ['energy', 'fuel', 'gas', 'management', 'SaaS', 'PWA'],
+  openGraph: {
+    title: 'EnergyFlow - Gas & Fuel Management SaaS',
+    description: 'Multi-branch SaaS platform for managing LPG Gas Plants and Fuel Stations',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
   },
 }
 
@@ -34,6 +46,7 @@ export default function RootLayout({
         <AuthProvider>
           {children}
           <Toaster />
+          <PwaInstallButton />
         </AuthProvider>
         {/* <Analytics /> */}
       </body>
