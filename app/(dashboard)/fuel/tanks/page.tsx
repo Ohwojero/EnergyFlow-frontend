@@ -415,19 +415,19 @@ export default function FuelTanksPage() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <Card className="p-6 bg-blue-100 dark:bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+        <Card className="p-6 !bg-blue-100 dark:!bg-blue-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <p className="text-sm text-muted-foreground mb-1">Total Tanks</p>
           <h3 className="text-3xl font-bold text-foreground">{tanks.length}</h3>
         </Card>
-        <Card className="p-6 bg-green-100 dark:bg-green-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+        <Card className="p-6 !bg-green-100 dark:!bg-green-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <p className="text-sm text-muted-foreground mb-1">Total Capacity</p>
           <h3 className="text-3xl font-bold text-foreground">{formatLitres(totalCapacity)}</h3>
         </Card>
-        <Card className="p-6 bg-purple-100 dark:bg-purple-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+        <Card className="p-6 !bg-purple-100 dark:!bg-purple-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <p className="text-sm text-muted-foreground mb-1">Current Volume</p>
           <h3 className="text-3xl font-bold text-foreground">{formatLitres(currentVolume)}</h3>
         </Card>
-        <Card className="p-6 bg-orange-100 dark:bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
+        <Card className="p-6 !bg-orange-100 dark:!bg-orange-900/20 border-0 shadow-card hover:shadow-card-hover transition-all">
           <p className="text-sm text-muted-foreground mb-1">Latest Variance</p>
           <h3 className={`text-3xl font-bold ${latestVariance < 0 ? 'text-red-600' : 'text-green-600'}`}>
             {formatLitres(latestVariance)}
