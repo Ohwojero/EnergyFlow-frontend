@@ -1,4 +1,6 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : '')
 
 class ApiService {
   private refreshPromise: Promise<any> | null = null;
@@ -22,6 +24,10 @@ class ApiService {
   }
 
   private async request(endpoint: string, options: RequestInit = {}, retryOnUnauthorized = true) {
+    if (!API_BASE_URL) {
+      throw new Error('NEXT_PUBLIC_API_URL is not configured for this deployment.')
+    }
+
     const url = `${API_BASE_URL}${endpoint}`;
     const mergedHeaders = {
       ...this.getAuthHeaders(),
