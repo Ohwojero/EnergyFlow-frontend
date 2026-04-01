@@ -32,6 +32,7 @@ export default function FuelTanksPage() {
   const [isTankDialogOpen, setIsTankDialogOpen] = useState(false)
   const [isReadingDialogOpen, setIsReadingDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [todayKey, setTodayKey] = useState(() => toLagosDateKey())
   const [tankForm, setTankForm] = useState({
     name: '',
     product_type: 'PMS',
@@ -56,6 +57,19 @@ export default function FuelTanksPage() {
     [readingForm.tank_id, tanks],
   )
 
+  const latestReadingByTank = useMemo(() => {
+    const map = new Map<string, TankReadingWithTank>()
+    readings.forEach((reading) => {
+      const existing = map.get(reading.tank_id)
+      const currentStamp = `${reading.reading_date}T${reading.created_at}`
+      const existingStamp = existing ? `${existing.reading_date}T${existing.created_at}` : ''
+      if (!existing || currentStamp > existingStamp) {
+        map.set(reading.tank_id, reading)
+      }
+    })
+    return map
+  }, [readings])
+
   const expectedClosingPreview = useMemo(() => {
     const opening = Number(readingForm.opening_volume_litres || 0)
     const deliveries = Number(readingForm.deliveries_litres || 0)
@@ -68,6 +82,14 @@ export default function FuelTanksPage() {
     const actual = Number(readingForm.actual_closing_litres || 0)
     return actual - expectedClosingPreview
   }, [expectedClosingPreview, readingForm.actual_closing_litres])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = toLagosDateKey()
+      setTodayKey((prev) => (prev === next ? prev : next))
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!canView) return
@@ -173,14 +195,41 @@ export default function FuelTanksPage() {
     }
     setReadingForm((prev) => {
       const selectedTank = tanks.find((tank) => tank.id === prev.tank_id) ?? tanks[0]
+      const latestReading = latestReadingByTank.get(selectedTank.id)
+      const carryForwardVolume = latestReading
+        ? latestReading.actual_closing_litres
+        : selectedTank.current_volume_litres
       return {
         ...prev,
         tank_id: selectedTank.id,
-        opening_volume_litres: prev.opening_volume_litres || String(selectedTank.current_volume_litres),
-        actual_closing_litres: prev.actual_closing_litres || String(selectedTank.current_volume_litres),
+        reading_date: prev.reading_date || todayKey,
+        opening_volume_litres: prev.opening_volume_litres || String(carryForwardVolume),
+        actual_closing_litres: prev.actual_closing_litres || String(carryForwardVolume),
       }
     })
-  }, [tanks])
+  }, [latestReadingByTank, tanks, todayKey])
+
+  useEffect(() => {
+    if (!isReadingDialogOpen) return
+    setReadingForm((prev) => {
+      const selectedTank = tanks.find((tank) => tank.id === prev.tank_id) ?? tanks[0]
+      if (!selectedTank) {
+        return { ...prev, reading_date: todayKey }
+      }
+      const latestReading = latestReadingByTank.get(selectedTank.id)
+      const carryForwardVolume = latestReading
+        ? latestReading.actual_closing_litres
+        : selectedTank.current_volume_litres
+      const shouldResetForNewDay = prev.reading_date !== todayKey
+      return {
+        ...prev,
+        tank_id: selectedTank.id,
+        reading_date: todayKey,
+        opening_volume_litres: shouldResetForNewDay ? String(carryForwardVolume) : prev.opening_volume_litres,
+        actual_closing_litres: shouldResetForNewDay ? String(carryForwardVolume) : prev.actual_closing_litres,
+      }
+    })
+  }, [isReadingDialogOpen, latestReadingByTank, tanks, todayKey])
 
   const totalCapacity = tanks.reduce((sum, tank) => sum + tank.capacity_litres, 0)
   const currentVolume = tanks.reduce((sum, tank) => sum + tank.current_volume_litres, 0)
@@ -198,14 +247,18 @@ export default function FuelTanksPage() {
 
   const resetReadingForm = () => {
     const firstTank = tanks[0]
+    const latestReading = firstTank ? latestReadingByTank.get(firstTank.id) : null
+    const carryForwardVolume = latestReading
+      ? latestReading.actual_closing_litres
+      : firstTank?.current_volume_litres ?? ''
     setReadingForm({
       tank_id: firstTank?.id ?? '',
-      reading_date: toLagosDateKey(),
-      opening_volume_litres: firstTank ? String(firstTank.current_volume_litres) : '',
+      reading_date: todayKey,
+      opening_volume_litres: firstTank ? String(carryForwardVolume) : '',
       deliveries_litres: '0',
       transfers_out_litres: '0',
       sales_litres: '0',
-      actual_closing_litres: firstTank ? String(firstTank.current_volume_litres) : '',
+      actual_closing_litres: firstTank ? String(carryForwardVolume) : '',
       dip_reading_litres: '',
       sensor_volume_litres: '',
       notes: '',
@@ -593,11 +646,16 @@ export default function FuelTanksPage() {
                 <Label htmlFor="reading-tank">Tank</Label>
                 <Select value={readingForm.tank_id} onValueChange={(value) => {
                   const selected = tanks.find((tank) => tank.id === value)
+                  const latestReading = selected ? latestReadingByTank.get(selected.id) : null
+                  const carryForwardVolume = latestReading
+                    ? latestReading.actual_closing_litres
+                    : selected?.current_volume_litres
                   setReadingForm((prev) => ({
                     ...prev,
                     tank_id: value,
-                    opening_volume_litres: selected ? String(selected.current_volume_litres) : prev.opening_volume_litres,
-                    actual_closing_litres: selected ? String(selected.current_volume_litres) : prev.actual_closing_litres,
+                    reading_date: todayKey,
+                    opening_volume_litres: selected ? String(carryForwardVolume) : prev.opening_volume_litres,
+                    actual_closing_litres: selected ? String(carryForwardVolume) : prev.actual_closing_litres,
                   }))
                 }}>
                   <SelectTrigger id="reading-tank">
@@ -664,6 +722,11 @@ export default function FuelTanksPage() {
             {activeTank ? (
               <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                 Current stored volume for <span className="font-semibold text-foreground">{activeTank.name}</span>: {formatLitres(activeTank.current_volume_litres)}
+              </div>
+            ) : null}
+            {activeTank ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-800/40 dark:bg-blue-950/20 dark:text-blue-300">
+                Next-day carry forward is enabled. Opening volume defaults to the latest saved closing volume for the selected tank.
               </div>
             ) : null}
             <div className="space-y-2">
