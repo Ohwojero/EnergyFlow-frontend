@@ -274,12 +274,12 @@ export default function GasInventoryPage() {
 
       {isOwner && !isPersonalOwner && branches.length > 0 && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
-          <div className="flex items-center gap-4">
-            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Label className="font-semibold text-foreground">Select Branch:</Label>
             <select
               value={activeBranchId}
               onChange={(e) => setActiveBranchId(e.target.value)}
-              className="w-80 h-10 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-80"
             >
               {branches.map((branch: any) => (
                 <option key={branch.id} value={branch.id}>

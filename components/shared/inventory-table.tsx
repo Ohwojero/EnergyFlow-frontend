@@ -73,13 +73,13 @@ export function InventoryTable({
 
   return (
     <Card className="shadow-card">
-      <div className="p-6 border-b border-border flex items-center justify-between">
+      <div className="flex flex-col gap-3 border-b border-border p-6 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-primary" />
           {title}
         </h3>
         {onAddNew && (
-          <Button onClick={onAddNew} className="bg-primary hover:bg-primary/90">
+          <Button onClick={onAddNew} className="w-full bg-primary hover:bg-primary/90 sm:w-auto">
             + Add New
           </Button>
         )}

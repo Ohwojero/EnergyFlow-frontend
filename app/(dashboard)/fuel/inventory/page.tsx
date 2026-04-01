@@ -256,15 +256,15 @@ export default function FuelInventoryPage() {
 
       {fuelBranches.length > 1 && (
         <Card className="p-4 mb-6 bg-muted/40 border-border">
-          <div className="flex items-center gap-3">
-            <Label htmlFor="fuel-branch-select" className="font-semibold text-foreground min-w-fit">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Label htmlFor="fuel-branch-select" className="font-semibold text-foreground">
               Fuel Branch
             </Label>
             <select
               id="fuel-branch-select"
               value={activeBranchId ?? ''}
               onChange={(e) => setActiveBranchId(e.target.value || null)}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-80"
             >
               {fuelBranches.map((branch) => (
                 <option key={branch.id} value={branch.id}>
@@ -280,7 +280,7 @@ export default function FuelInventoryPage() {
       <InventoryTable
         title="Fuel Tank Inventory"
         items={inventoryItems}
-        onAddNew={isOwner ? undefined : handleAddNew}
+        onAddNew={handleAddNew}
         onDeleteItem={undefined}
         showDateTime
       />

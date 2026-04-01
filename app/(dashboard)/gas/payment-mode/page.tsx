@@ -334,18 +334,18 @@ export default function GasPaymentModePage() {
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
             <DollarSign className="w-8 h-8 text-secondary" />
             Payment Mode
           </h1>
           <p className="text-muted-foreground">Track gas sales by payment method</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
           {isOwner && !isPersonalOwner && (
             <Select value={businessFilter} onValueChange={setBusinessFilter}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-full sm:w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -357,7 +357,7 @@ export default function GasPaymentModePage() {
             </Select>
           )}
           {!isPersonalOwner && (
-            <Button onClick={() => setIsPaymentModalOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
+            <Button onClick={() => setIsPaymentModalOpen(true)} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
               Record Payment
             </Button>
           )}

@@ -493,20 +493,20 @@ export default function ReportsPage() {
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
             <BarChart3 className="w-8 h-8 text-primary" />
             Reports & Analytics
           </h1>
           <p className="text-muted-foreground">Check daily sales by date for gas and fuel.</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
           {isOwner && !isPersonalOwner && (
-            <div className="flex items-center gap-2">
-              <Label className="font-semibold text-foreground text-sm min-w-fit">Filter by:</Label>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <Label className="font-semibold text-foreground text-sm">Filter by:</Label>
               <Select value={businessTypeFilter} onValueChange={(value: 'all' | 'gas' | 'fuel') => setBusinessTypeFilter(value)}>
-                <SelectTrigger className="w-40">
+                <SelectTrigger className="w-full sm:w-40">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -517,7 +517,7 @@ export default function ReportsPage() {
               </Select>
             </div>
           )}
-          <Button onClick={handleExportReport} className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
+          <Button onClick={handleExportReport} className="flex w-full items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
             <Download className="w-4 h-4" />
             Export Report
           </Button>
