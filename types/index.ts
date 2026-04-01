@@ -125,6 +125,36 @@ export interface FuelExpense {
   created_at: string
 }
 
+export interface FuelTank {
+  id: string
+  branch_id: string
+  name: string
+  product_type: 'PMS' | 'AGO' | 'DPK'
+  capacity_litres: number
+  current_volume_litres: number
+  status: string
+  created_at: string
+  updated_at?: string
+}
+
+export interface FuelTankReading {
+  id: string
+  tank_id: string
+  reading_date: string
+  opening_volume_litres: number
+  deliveries_litres: number
+  transfers_out_litres: number
+  sales_litres: number
+  expected_closing_litres: number
+  actual_closing_litres: number
+  variance_litres: number
+  dip_reading_litres?: number | null
+  sensor_volume_litres?: number | null
+  recorded_by_name?: string | null
+  notes: string
+  created_at: string
+}
+
 // Dashboard Types
 export interface DashboardMetric {
   label: string

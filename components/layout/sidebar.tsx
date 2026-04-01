@@ -81,6 +81,7 @@ export function Sidebar() {
           if (businessType === 'fuel') {
             items.push(
               { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+              { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
               { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
               { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
               { label: 'Expense', href: '/fuel/expenses', icon: AlertCircle },
@@ -134,6 +135,7 @@ export function Sidebar() {
                 { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
                 { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
                 { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+                { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
               ]
             }
           )
@@ -149,6 +151,7 @@ export function Sidebar() {
           items.push(
             { label: 'Fuel Branches', href: '/fuel/branches', icon: Fuel },
             { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+            { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
             { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
             { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle }
           )
@@ -177,6 +180,7 @@ export function Sidebar() {
       case 'fuel_manager':
         items.push(
           { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+          { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
           { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
           { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
           { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },

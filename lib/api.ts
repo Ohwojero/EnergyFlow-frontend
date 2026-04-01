@@ -302,6 +302,35 @@ class ApiService {
     return this.request(`/fuel/pumps/${branchId}`);
   }
 
+  async createFuelTank(data: any) {
+    return this.request('/fuel/tanks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getFuelTanks(branchId: string) {
+    return this.request(`/fuel/tanks/${branchId}`);
+  }
+
+  async updateFuelTank(id: string, data: any) {
+    return this.request(`/fuel/tanks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createFuelTankReading(data: any) {
+    return this.request('/fuel/tank-readings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getFuelTankReadings(branchId: string) {
+    return this.request(`/fuel/tank-readings/branch/${branchId}`);
+  }
+
   async createShiftReconciliation(data: any) {
     return this.request('/fuel/reconciliations', {
       method: 'POST',

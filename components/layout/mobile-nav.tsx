@@ -93,6 +93,7 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
           if (businessType === 'fuel') {
             items.push(
               { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+              { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
               { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
               { label: 'Fuel Transfer', href: '/fuel/transfer', icon: DollarSign },
               { label: 'Expense', href: '/fuel/expenses', icon: AlertCircle },
@@ -146,6 +147,7 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
                 { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
                 { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
                 { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+                { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
               ],
             }
           )
@@ -163,6 +165,7 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
           items.push(
             { label: 'Fuel Branches', href: '/fuel/branches', icon: Fuel },
             { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+            { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
             { label: 'Fuel Sales', href: '/fuel/sales', icon: ShoppingCart },
             { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle }
           )
@@ -193,6 +196,7 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
       case 'fuel_manager':
         items.push(
           { label: 'Inventory', href: '/fuel/inventory', icon: Package },
+          { label: 'Tank Storage', href: '/fuel/tanks', icon: Fuel },
           { label: 'Sales', href: '/fuel/sales', icon: ShoppingCart },
           { label: 'Expenses', href: '/fuel/expenses', icon: AlertCircle },
           { label: 'Users', href: '/users', icon: Users },
