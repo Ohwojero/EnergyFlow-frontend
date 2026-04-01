@@ -246,6 +246,8 @@ export default function DashboardPage() {
     if (businessTypeFilter === 'fuel') return fuelExpenses
     return gasExpenses + fuelExpenses
   }, [businessTypeFilter, gasExpenses, fuelExpenses])
+  const gasProfit = gasSales - gasExpenses
+  const fuelProfit = fuelSales - fuelExpenses
   const totalSales = gasSales + fuelSales
   const totalInventory = gasInventoryValue + fuelInventoryValue
   const totalRevenue = totalSales
@@ -404,7 +406,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="p-3 bg-blue-100/50 dark:bg-blue-900/20 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
                       <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1 font-semibold">Profit</p>
-                      <p className="text-base font-bold text-green-600">₦{((gasSales * 0.3) / 1000).toFixed(0).replace('.', ',')}K</p>
+                      <p className="text-base font-bold text-green-600">{formatMoneyShort(gasProfit)}</p>
                     </div>
                   </div>
                 </div>
@@ -461,7 +463,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="p-3 bg-orange-100/50 dark:bg-orange-900/20 rounded-lg border border-orange-200/50 dark:border-orange-800/50">
                       <p className="text-[10px] text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-1 font-semibold">Profit</p>
-                      <p className="text-base font-bold text-green-600">₦{((fuelSales * 0.25) / 1000).toFixed(0).replace('.', ',')}K</p>
+                      <p className="text-base font-bold text-green-600">{formatMoneyShort(fuelProfit)}</p>
                     </div>
                   </div>
                 </div>
