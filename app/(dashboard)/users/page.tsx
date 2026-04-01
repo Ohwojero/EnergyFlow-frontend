@@ -353,8 +353,8 @@ export default function UsersPage() {
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
             <Users className="w-8 h-8 text-primary" />
             User Management
@@ -365,7 +365,7 @@ export default function UsersPage() {
         </div>
         <Button
           onClick={handleOpenAddUser}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
+          className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto"
         >
           Add User
         </Button>

@@ -356,7 +356,7 @@ export default function GasPaymentModePage() {
               </SelectContent>
             </Select>
           )}
-          {!isPersonalOwner && (
+          {!isOwner && (
             <Button onClick={() => setIsPaymentModalOpen(true)} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
               Record Payment
             </Button>

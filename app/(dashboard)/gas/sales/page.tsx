@@ -513,7 +513,7 @@ export default function GasSalesPage() {
             </p>
           )}
         </div>
-        {!isPersonalOwnerOnly && (
+        {!isOwner && (
           <Button onClick={() => setIsRecordSaleOpen(true)} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
             Record Sale
           </Button>

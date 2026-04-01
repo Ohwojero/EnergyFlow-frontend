@@ -336,28 +336,28 @@ export default function ExpensesPage() {
 
   return (
     <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-3">
             <AlertCircle className="w-8 h-8 text-secondary" />
             Expenses
           </h1>
           <p className="text-muted-foreground">Track and manage expenses across all branches</p>
         </div>
-        <Button onClick={() => setIsExpenseModalOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90">
+        <Button onClick={() => setIsExpenseModalOpen(true)} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
           Record Expense
         </Button>
       </div>
 
       {isOwner && (
         <Card className="p-4 mb-6 bg-muted/50 border-border">
-          <div className="flex items-center gap-4">
-            <Label className="font-semibold text-foreground min-w-fit">Select Branch:</Label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Label className="font-semibold text-foreground">Select Branch:</Label>
             <Select
               value={localSelectedBranchId || 'all'}
               onValueChange={(value) => setLocalSelectedBranchId(value === 'all' ? null : value)}
             >
-              <SelectTrigger className="w-80">
+              <SelectTrigger className="w-full sm:w-80">
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
