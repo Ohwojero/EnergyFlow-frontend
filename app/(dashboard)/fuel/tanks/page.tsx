@@ -21,7 +21,8 @@ export default function FuelTanksPage() {
   const { user, selectedBranchId } = useAuth()
   const isOwner = user?.role === 'org_owner'
   const isFuelManager = user?.role === 'fuel_manager'
-  const canManage = isOwner || isFuelManager
+  const canView = isOwner || isFuelManager
+  const canManage = isFuelManager
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [activeBranchId, setActiveBranchId] = useState<string | null>(selectedBranchId)
@@ -69,7 +70,7 @@ export default function FuelTanksPage() {
   }, [expectedClosingPreview, readingForm.actual_closing_litres])
 
   useEffect(() => {
-    if (!canManage) return
+    if (!canView) return
 
     const loadBranches = async () => {
       try {
@@ -103,10 +104,10 @@ export default function FuelTanksPage() {
     }
 
     loadBranches()
-  }, [canManage, isFuelManager, selectedBranchId, user?.assigned_branches])
+  }, [canView, isFuelManager, selectedBranchId, user?.assigned_branches])
 
   useEffect(() => {
-    if (!activeBranchId || !canManage) {
+    if (!activeBranchId || !canView) {
       setTanks([])
       setReadings([])
       return
@@ -163,7 +164,7 @@ export default function FuelTanksPage() {
     }
 
     loadBranchData()
-  }, [activeBranchId, branches, canManage])
+  }, [activeBranchId, branches, canView])
 
   useEffect(() => {
     if (!tanks.length) {
@@ -213,7 +214,13 @@ export default function FuelTanksPage() {
 
   const handleCreateTank = async (event: FormEvent) => {
     event.preventDefault()
-    if (!activeBranchId) return
+    if (!activeBranchId) {
+      toast({
+        title: 'Missing branch',
+        description: 'Select a fuel branch before saving a tank.',
+      })
+      return
+    }
 
     const capacity = Number(tankForm.capacity_litres)
     const currentVolume = Number(tankForm.current_volume_litres || 0)
@@ -357,7 +364,7 @@ export default function FuelTanksPage() {
     }
   }
 
-  if (!canManage) {
+  if (!canView) {
     return (
       <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto">
         <Card className="p-6 text-sm text-muted-foreground">
@@ -379,21 +386,23 @@ export default function FuelTanksPage() {
             Monitor tank levels, daily storage balance, and reconciliation variance.
           </p>
         </div>
-        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-          <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => {
-            resetReadingForm()
-            setIsReadingDialogOpen(true)
-          }}>
-            Record Reading
-          </Button>
-          <Button type="button" className="w-full sm:w-auto" onClick={() => {
-            resetTankForm()
-            setIsTankDialogOpen(true)
-          }}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Tank
-          </Button>
-        </div>
+        {canManage ? (
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => {
+              resetReadingForm()
+              setIsReadingDialogOpen(true)
+            }}>
+              Record Reading
+            </Button>
+            <Button type="button" className="w-full sm:w-auto" onClick={() => {
+              resetTankForm()
+              setIsTankDialogOpen(true)
+            }}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Tank
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <Card className="p-4 mb-6 bg-muted/50 border-border">
@@ -437,19 +446,20 @@ export default function FuelTanksPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card className="shadow-card">
-          <div className="p-6 border-b border-border">
+        <Card className="overflow-hidden border border-orange-200/70 bg-orange-50/40 shadow-card hover:shadow-card-hover transition-all dark:border-orange-800/40 dark:bg-orange-950/10">
+          <div className="flex items-center gap-2 border-b border-orange-200/70 bg-orange-100/50 p-6 dark:border-orange-800/40 dark:bg-orange-900/10">
+            <Fuel className="w-5 h-5 text-orange-600 dark:text-orange-400" />
             <h3 className="text-lg font-semibold text-foreground">Tank Register</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Tank</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Product</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Capacity</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Current Volume</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Status</th>
+                <tr className="border-b border-orange-200/60 bg-orange-100/30 dark:border-orange-800/30 dark:bg-orange-900/5">
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">Tank</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">Capacity</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">Current Volume</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -463,12 +473,16 @@ export default function FuelTanksPage() {
                   </tr>
                 ) : (
                   tanks.map((tank) => (
-                    <tr key={tank.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                    <tr key={tank.id} className="border-b border-orange-200/40 transition-colors hover:bg-orange-100/30 dark:border-orange-800/20 dark:hover:bg-orange-900/10">
                       <td className="px-6 py-4 font-medium text-foreground">{tank.name}</td>
                       <td className="px-6 py-4 text-foreground">{tank.product_type}</td>
                       <td className="px-6 py-4 text-foreground">{formatLitres(tank.capacity_litres)}</td>
                       <td className="px-6 py-4 text-foreground">{formatLitres(tank.current_volume_litres)}</td>
-                      <td className="px-6 py-4 text-foreground capitalize">{tank.status}</td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold capitalize text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+                          {tank.status}
+                        </span>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -477,20 +491,20 @@ export default function FuelTanksPage() {
           </div>
         </Card>
 
-        <Card className="shadow-card">
-          <div className="p-6 border-b border-border flex items-center gap-2">
-            <Waves className="w-5 h-5 text-primary" />
+        <Card className="overflow-hidden border border-blue-200/70 bg-blue-50/40 shadow-card hover:shadow-card-hover transition-all dark:border-blue-800/40 dark:bg-blue-950/10">
+          <div className="flex items-center gap-2 border-b border-blue-200/70 bg-blue-100/50 p-6 dark:border-blue-800/40 dark:bg-blue-900/10">
+            <Waves className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             <h3 className="text-lg font-semibold text-foreground">Daily Tank Readings</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Date</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Tank</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Expected</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Actual</th>
-                  <th className="px-6 py-3 text-left font-semibold text-muted-foreground">Variance</th>
+                <tr className="border-b border-blue-200/60 bg-blue-100/30 dark:border-blue-800/30 dark:bg-blue-900/5">
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Tank</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Expected</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Actual</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Variance</th>
                 </tr>
               </thead>
               <tbody>
@@ -504,7 +518,7 @@ export default function FuelTanksPage() {
                   </tr>
                 ) : (
                   readings.map((reading) => (
-                    <tr key={reading.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                    <tr key={reading.id} className="border-b border-blue-200/40 transition-colors hover:bg-blue-100/30 dark:border-blue-800/20 dark:hover:bg-blue-900/10">
                       <td className="px-6 py-4 text-foreground">{reading.reading_date}</td>
                       <td className="px-6 py-4 font-medium text-foreground">{reading.tank_name || 'Tank'}</td>
                       <td className="px-6 py-4 text-foreground">{formatLitres(reading.expected_closing_litres)}</td>
@@ -521,7 +535,7 @@ export default function FuelTanksPage() {
         </Card>
       </div>
 
-      <Dialog open={isTankDialogOpen} onOpenChange={setIsTankDialogOpen}>
+      <Dialog open={canManage && isTankDialogOpen} onOpenChange={setIsTankDialogOpen}>
         <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Fuel Tank</DialogTitle>
@@ -567,7 +581,7 @@ export default function FuelTanksPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isReadingDialogOpen} onOpenChange={setIsReadingDialogOpen}>
+      <Dialog open={canManage && isReadingDialogOpen} onOpenChange={setIsReadingDialogOpen}>
         <DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Record Tank Reading</DialogTitle>
